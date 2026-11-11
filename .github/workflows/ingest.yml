@@ -1,5 +1,6 @@
 name: Ingest
 
+# Scheduled workflows only run from the default branch (main).
 on:
   schedule:
     # Beijing time (UTC+8):
