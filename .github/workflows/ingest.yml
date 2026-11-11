@@ -1,0 +1,49 @@
+name: Ingest
+
+on:
+  schedule:
+    # Beijing time (UTC+8):
+    #   08:30-11:50 every 10 minutes
+    #   12:30 once
+    #   13:00-17:50 every 10 minutes
+    #   18:30 once
+    #   19:00-23:30 every 10 minutes
+    - cron: '30,40,50 0 * * *'
+    - cron: '*/10 1-3 * * *'
+    - cron: '30 4 * * *'
+    - cron: '*/10 5-9 * * *'
+    - cron: '30 10 * * *'
+    - cron: '*/10 11-14 * * *'
+    - cron: '0,10,20,30 15 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: jingkan-ingest
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Fetch and write to D1
+        env:
+          JINGKAN_BASE_URL: ${{ vars.JINGKAN_BASE_URL }}
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+          PREWARM_TRANSLATIONS: ${{ vars.PREWARM_TRANSLATIONS || '1' }}
+        run: npm run ingest

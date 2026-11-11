@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0" xmlns:discourse="http://www.discourse.org/" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>LINUX DO - 最新话题</title>
+    <link>https://linux.do/latest</link>
+    <description>最新话题</description>
+    <language>zh-CN</language>
+    <atom:link href="https://linux.do/latest.rss" rel="self" type="application/rss+xml" />
+    <atom:link href="https://linux.do/latest.md" rel="alternate" type="text/markdown" />
+      <lastBuildDate>Wed, 11 Nov 2026 08:57:43 +0000</lastBuildDate>
+        <item>
+          <title>cladue kyc 还有必要过吗</title>
+          <dc:creator><![CDATA[长空 冷月]]></dc:creator>
+          <category>搞七捻三</category>
+          <description><![CDATA[
+            <p>Google老号了最起码4年以上了， 上周google play 订阅的claude       pro 今天弹kyc ，还有必须认证吗，求问，ip测试了很干净用的伪家宽，应该不是ip问题，我朋友用的也是这个伪家宽都没事，想用cladue 还是比较好用的</p>
+            <p><small>1 个帖子 - 1 位参与者</small></p>
+            <p><a href="https://linux.do/t/topic/3156190">阅读完整话题</a></p>
+          ]]></description>
+          <link>https://linux.do/t/topic/3156190</link>
+          <pubDate>Wed, 11 Nov 2026 08:57:43 +0000</pubDate>
+          <discourse:topicPinned>No</discourse:topicPinned>
+          <discourse:topicClosed>No</discourse:topicClosed>
+          <discourse:topicArchived>No</discourse:topicArchived>
+          <guid isPermaLink="false">linux.do-topic-3156190</guid>
+          <source url="https://linux.do/t/topic/3156190.rss">cladue kyc 还有必要过吗</source>
+        </item>
+<item>
+          <title>debuff叠加勇闯claude，开贴记录存活时间</title>
+          <dc:creator><![CDATA[richybai]]></dc:creator>
+          <category>搞七捻三</category>
+          <description><![CDATA[
+            <p>前情提要：</p>
+<p>gmail账号注册了claude后，五月多的时候使用美区app store订阅了一个月，之后没有续订，过了二十多天把我账号封了。当时的代理是10刀的垃圾美西vps。</p>
+<p>后来一直用OAI，太能搞幺蛾子了，现在又想用Claude。</p>
+<p>前段时间伪家宽用iCloud注册了一个claude，一小时就封号。<br>
+<a href="http://xn--proton-9m7igln3fc8tzquocw565b.me" rel="noopener nofollow ugc">同一个伪家宽用proton.me</a>（也是从某个佬友帖子看到的）注册，养了大概两周，每天用中文和他对对话。</p>
+<p>昨晚使用同一个美区app store礼品卡订阅claude pro，直接弹kyc，使用护照过了。</p>
+<p>今天上班，反代到部署在伪家宽的vps上美美开蹬。</p>
+<p>开贴记录一下存活时间，当前存活第一天。</p>
+            <p><small>1 个帖子 - 1 位参与者</small></p>
+            <p><a href="https://linux.do/t/topic/3156189">阅读完整话题</a></p>
+          ]]></description>
+          <link>https://linux.do/t/topic/3156189</link>
+          <pubDate>Wed, 11 Nov 2026 08:57:38 +0000</pubDate>
+          <discourse:topicPinned>No</discourse:topicPinned>
+          <discourse:topicClosed>No</discourse:topicClosed>
+          <discourse:topicArchived>No</discourse:topicArchived>
+          <guid isPermaLink="false">linux.do-topic-3156189</guid>
+          <source url="https://linux.do/t/topic/3156189.rss">debuff叠加勇闯claude，开贴记录存活时间</source>
+        </item>
+<item>
+          <title>今天是有Claude大规模kyc+封禁吗？</title>
+          <dc:creator><![CDATA[App]]></dc:creator>
+          <category>搞七捻三</category>
+          <description><![CDATA[
+            <p>我稳定开了半年20x的号今天下午突然就被弹kyc了，L站，和一些群聊里，也有很多人出现这种情况，都是老号。请问大家是否这样吗？</p>
+            <p><small>2 个帖子 - 2 位参与者</small></p>
+            <p><a href="https://linux.do/t/topic/3156187">阅读完整话题</a></p>
+          ]]></description>
+          <link>https://linux.do/t/topic/3156187</link>
+          <pubDate>Wed, 11 Nov 2026 08:56:56 +0000</pubDate>
+          <discourse:topicPinned>No</discourse:topicPinned>
+          <discourse:topicClosed>No</discourse:topicClosed>
+          <discourse:topicArchived>No</discourse:topicArchived>
+          <guid isPermaLink="false">linux.do-topic-3156187</guid>
+          <source url="https://linux.do/t/topic/3156187.rss">今天是有Claude大规模kyc+封禁吗？</source>
+        </item>
+  </channel>
+</rss>
