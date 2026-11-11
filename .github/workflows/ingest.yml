@@ -43,7 +43,7 @@ jobs:
 
       - name: Fetch and write to D1
         env:
-          JINGKAN_BASE_URL: ${{ vars.JINGKAN_BASE_URL }}
+          JINGKAN_BASE_URL: https://jingkan.lzz313-690.workers.dev
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
           PREWARM_TRANSLATIONS: ${{ vars.PREWARM_TRANSLATIONS || '1' }}
         run: npm run ingest
