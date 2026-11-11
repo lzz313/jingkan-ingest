@@ -49,5 +49,5 @@ JINGKAN_BASE_URL=http://127.0.0.1:8787 INGEST_TOKEN=<local-dev-token> npm run in
 
 ## 维护提示
 
-- 公开发布仓库的定时 workflow 在 60 天没有仓库活动后可能被 GitHub 自动禁用；建议保留每月一次的 keepalive commit，或定期手动触发一次。
+- 公开发布仓库的定时 workflow 在 60 天没有仓库活动后可能被 GitHub 自动禁用；仓库已内置 `Keepalive` workflow，每月 1 日自动提交一次来重置计时。
 - 建议开启分支保护，并要求外部贡献者的 Actions 运行需人工批准。
