@@ -7,6 +7,7 @@ import { fetchGithub } from './adapters/github';
 import { fetchHn } from './adapters/hn';
 import { fetchLinuxDo } from './adapters/linuxdo';
 import { fetchNodeseek } from './adapters/nodeseek';
+import { fetchReddit } from './adapters/reddit';
 import { fetchV2ex } from './adapters/v2ex';
 import { fetchX } from './adapters/x';
 import { loadConfig } from './env';
@@ -30,6 +31,7 @@ const ADAPTERS: Adapter[] = [
   { source: 'linuxdo', run: fetchLinuxDo },
   { source: 'hn', run: fetchHn },
   { source: 'github', run: fetchGithub },
+  { source: 'reddit', run: fetchReddit },
 ];
 
 function log(message: string): void {
@@ -114,17 +116,26 @@ async function main(): Promise<void> {
   }
 
   if (config.prewarmTranslations) {
-    const hnIds = successfulItems
-      .filter((item) => item.source === 'hn' && !item.titleZh)
-      .slice(0, 20)
-      .map((item) => `${item.source}:${item.externalId}`);
+    const pendingTitles = successfulItems.filter(
+      (item) => (item.source === 'hn' || item.source === 'reddit') && !item.titleZh,
+    );
+    const hnTitles = pendingTitles.filter((item) => item.source === 'hn');
+    const redditTitles = pendingTitles.filter((item) => item.source === 'reddit');
+    // Alternate sources so a busy HN front page cannot starve Reddit titles.
+    const titleIds: string[] = [];
+    for (let index = 0; index < Math.max(hnTitles.length, redditTitles.length); index++) {
+      for (const pool of [hnTitles, redditTitles]) {
+        const item = pool[index];
+        if (item && titleIds.length < 20) titleIds.push(`${item.source}:${item.externalId}`);
+      }
+    }
     const githubIds = successfulItems
       .filter((item) => item.source === 'github' && !item.briefZh)
       .slice(0, 20)
       .map((item) => `${item.source}:${item.externalId}`);
 
     for (const [field, ids] of [
-      ['title', hnIds],
+      ['title', titleIds],
       ['body', githubIds],
     ] as const) {
       if (ids.length === 0) continue;

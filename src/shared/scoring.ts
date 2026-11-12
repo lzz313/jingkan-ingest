@@ -60,6 +60,13 @@ export function computeHot(source: NormalizedItem['source'], metrics: ItemMetric
       const isHot = comments >= 10;
       return { isHot, score: comments > 0 ? scaled(comments, 1, 10, 60) : 0 };
     }
+    case 'reddit': {
+      // The RSS hot feed is already ranked by Reddit, and it exposes neither
+      // scores nor comment counts, so use its order as the heat signal.
+      const rank = finite(metrics.rank);
+      const isHot = rank > 0 && rank <= 10;
+      return { isHot, score: rank > 0 ? scaled(26 - rank, 1, 10, 60) : 0 };
+    }
     default:
       return { isHot: false, score: 0 };
   }

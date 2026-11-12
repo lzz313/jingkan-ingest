@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+  <category term="programming" label="r/programming"/>
+  <updated>2026-11-12T12:00:00+00:00</updated>
+  <entry>
+    <author><name>/u/alice</name><uri>https://www.reddit.com/user/alice</uri></author>
+    <category term="programming" label="r/programming"/>
+    <content type="html">&lt;table&gt;&lt;tr&gt;&lt;td&gt;&lt;img src=&quot;https://external-preview.redd.it/thumb.jpeg?width=640&amp;amp;crop=smart&amp;amp;s=abc&quot; alt=&quot;Thumb&quot; /&gt;&lt;/td&gt;&lt;td&gt; submitted by &lt;a href=&quot;https://www.reddit.com/user/alice&quot;&gt; /u/alice &lt;/a&gt; to &lt;a href=&quot;https://www.reddit.com/r/programming/&quot;&gt; r/programming &lt;/a&gt; &lt;br/&gt; &lt;span&gt;&lt;a href=&quot;https://example.com/parser?x=1&amp;amp;y=2&quot;&gt;[link]&lt;/a&gt;&lt;/span&gt; &lt;span&gt;&lt;a href=&quot;https://www.reddit.com/r/programming/comments/aaa111/tiny_parser/&quot;&gt;[comments]&lt;/a&gt;&lt;/span&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;</content>
+    <id>t3_aaa111</id>
+    <media:thumbnail url="https://external-preview.redd.it/thumb.jpeg?width=640&amp;amp;crop=smart&amp;amp;s=abc" />
+    <link href="https://www.reddit.com/r/programming/comments/aaa111/tiny_parser/" />
+    <updated>2026-11-12T11:00:00+00:00</updated>
+    <published>2026-11-12T11:00:00+00:00</published>
+    <title>A tiny parser &amp; its benchmark</title>
+  </entry>
+  <entry>
+    <author><name>/u/bob</name><uri>https://www.reddit.com/user/bob</uri></author>
+    <category term="webdev" label="r/webdev"/>
+    <content type="html">&lt;!-- SC_OFF --&gt;&lt;div class=&quot;md&quot;&gt;&lt;p&gt;I am researching how free tiers handle abuse.&lt;/p&gt;&lt;/div&gt;&lt;!-- SC_ON --&gt; submitted by &lt;a href=&quot;https://www.reddit.com/user/bob&quot;&gt; /u/bob &lt;/a&gt; to &lt;a href=&quot;https://www.reddit.com/r/webdev/&quot;&gt; r/webdev &lt;/a&gt; &lt;br/&gt; &lt;span&gt;&lt;a href=&quot;https://www.reddit.com/r/webdev/comments/bbb222/free_tiers/&quot;&gt;[comments]&lt;/a&gt;&lt;/span&gt;</content>
+    <id>t3_bbb222</id>
+    <link href="https://www.reddit.com/r/webdev/comments/bbb222/free_tiers/" />
+    <updated>2026-11-12T10:30:00+00:00</updated>
+    <published>2026-11-12T10:30:00+00:00</published>
+    <title>How do you handle free-tier abuse?</title>
+  </entry>
+  <entry>
+    <author><name>/u/carol</name><uri>https://www.reddit.com/user/carol</uri></author>
+    <category term="webdev" label="r/webdev"/>
+    <content type="html">&lt;table&gt;&lt;tr&gt;&lt;td&gt; submitted by &lt;a href=&quot;https://www.reddit.com/user/carol&quot;&gt; /u/carol &lt;/a&gt; to &lt;a href=&quot;https://www.reddit.com/r/webdev/&quot;&gt; r/webdev &lt;/a&gt; &lt;br/&gt; &lt;span&gt;&lt;a href=&quot;https://www.reddit.com/r/webdev/s/n3ZBJ6ozuq&quot;&gt;[link]&lt;/a&gt;&lt;/span&gt; &lt;span&gt;&lt;a href=&quot;https://www.reddit.com/r/webdev/comments/ccc333/update/&quot;&gt;[comments]&lt;/a&gt;&lt;/span&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;</content>
+    <id>t3_ccc333</id>
+    <link href="https://www.reddit.com/r/webdev/comments/ccc333/update/" />
+    <updated>2026-11-12T09:00:00+00:00</updated>
+    <published>2026-11-12T09:00:00+00:00</published>
+    <title>Update: it is genuinely depressing</title>
+  </entry>
+</feed>

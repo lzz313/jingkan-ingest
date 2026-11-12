@@ -1,4 +1,4 @@
-export const SOURCE_IDS = ['x', 'v2ex', 'nodeseek', 'linuxdo', 'hn', 'github'] as const;
+export const SOURCE_IDS = ['x', 'v2ex', 'nodeseek', 'linuxdo', 'hn', 'github', 'reddit'] as const;
 export type SourceId = (typeof SOURCE_IDS)[number];
 
 export interface ItemMetrics {
@@ -12,6 +12,8 @@ export interface ItemMetrics {
   starsTotal?: number;
   posts?: number;
   participants?: number;
+  /** Position in the source's own hot ranking (Reddit RSS). */
+  rank?: number;
   [key: string]: number | string | undefined;
 }
 

@@ -10,6 +10,7 @@
 - LINUX DO
 - Hacker News
 - GitHub Trending
+- Reddit（r/programming / r/technology / r/LocalLLaMA / r/webdev 合并热榜，RSS）
 
 ## 定时安排
 
@@ -32,7 +33,7 @@
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
 | `INGEST_TOKEN` | Secret | 与 Worker 的 `INGEST_TOKEN` secret 相同 |
-| `PREWARM_TRANSLATIONS` | Variable | 可选，设为 `0` 可关闭 HN / GitHub 的翻译预热 |
+| `PREWARM_TRANSLATIONS` | Variable | 可选，设为 `0` 可关闭 HN / Reddit / GitHub 的翻译预热 |
 
 Worker 地址直接写在 `.github/workflows/ingest.yml` 里（目前是 `https://jing.show`）；换自定义域名时同步修改即可。
 

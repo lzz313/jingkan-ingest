@@ -4,6 +4,7 @@ import { fetchNodeseek } from '../src/ingest/adapters/nodeseek';
 import { fetchLinuxDo, parseReaderMarkdown } from '../src/ingest/adapters/linuxdo';
 import { fetchHn } from '../src/ingest/adapters/hn';
 import { fetchGithub } from '../src/ingest/adapters/github';
+import { fetchReddit } from '../src/ingest/adapters/reddit';
 import { fetchX } from '../src/ingest/adapters/x';
 import { fixture } from './helpers';
 
@@ -226,5 +227,52 @@ describe('X daily report adapter', () => {
     expect(first.publishedAt).toBeGreaterThan(Date.UTC(2026, 0, 1));
     expect(first.publishedAt).toBeLessThan(Date.UTC(2026, 10, 12));
     expect(first.authorHandle).toBe('Google');
+  });
+});
+
+describe('Reddit adapter', () => {
+  it('maps the multireddit hot feed and keeps its rank as the heat signal', async () => {
+    stubFetch([
+      {
+        match: 'reddit.com/r/programming+technology',
+        file: 'reddit.xml',
+        type: 'application/atom+xml',
+      },
+    ]);
+    const items = await fetchReddit();
+    expect(items).toHaveLength(3);
+
+    const link = items[0]!;
+    expect(link.source).toBe('reddit');
+    expect(link.externalId).toBe('aaa111');
+    expect(link.url).toBe('https://example.com/parser?x=1&y=2');
+    expect(link.author).toBe('alice');
+    expect(link.metrics?.rank).toBe(1);
+    expect(link.extra?.subreddit).toBe('programming');
+    expect(link.extra?.redditUrl).toBe(
+      'https://www.reddit.com/r/programming/comments/aaa111/tiny_parser/',
+    );
+    expect(link.images?.[0]).toBe(
+      'https://external-preview.redd.it/thumb.jpeg?width=640&crop=smart&s=abc',
+    );
+    expect(link.body).toBe('');
+
+    const self = items[1]!;
+    // Self posts link to their comments page and carry the text in SC_OFF.
+    expect(self.url).toBe('https://www.reddit.com/r/webdev/comments/bbb222/free_tiers/');
+    expect(self.body).toContain('free tiers handle abuse');
+    expect(self.brief).toContain('free tiers handle abuse');
+    expect(self.metrics?.rank).toBe(2);
+
+    const share = items[2]!;
+    // reddit.com/r/<sub>/s/... share links are not external articles.
+    expect(share.url).toBe('https://www.reddit.com/r/webdev/comments/ccc333/update/');
+    expect(share.extra?.subreddit).toBe('webdev');
+    expect(share.metrics?.rank).toBe(3);
+  });
+
+  it('rejects an unexpected payload instead of reporting an empty success', async () => {
+    vi.stubGlobal('fetch', async () => new Response('<html>blocked</html>', { status: 200 }));
+    await expect(fetchReddit()).rejects.toThrow('unexpected feed');
   });
 });

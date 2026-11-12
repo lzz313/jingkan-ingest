@@ -52,6 +52,13 @@ export const SOURCES: Record<SourceId, SourceMeta> = {
     home: 'https://github.com/trending',
     color: '#24292f',
   },
+  reddit: {
+    id: 'reddit',
+    name: 'Reddit',
+    shortName: 'Reddit',
+    home: 'https://www.reddit.com',
+    color: '#ff4500',
+  },
 };
 
 export const SOURCE_ORDER: SourceId[] = [...SOURCE_IDS];
