@@ -52,8 +52,16 @@ export async function fetchHn(): Promise<NormalizedItem[]> {
   recentUrl.searchParams.set('numericFilters', `created_at_i>${since},points>=10`);
   recentUrl.searchParams.set('hitsPerPage', '50');
 
+  // The front page holds ~30 stories, ordered by HN's rank. A freshly promoted
+  // story sits at the bottom with only a few points, so the old default page
+  // size of 20 truncated exactly the newest entries and the feed looked frozen
+  // between the `points>=10` milestones.
+  const frontPageUrl = new URL('https://hn.algolia.com/api/v1/search');
+  frontPageUrl.searchParams.set('tags', 'front_page');
+  frontPageUrl.searchParams.set('hitsPerPage', '50');
+
   const results = await Promise.allSettled([
-    fetchJson<AlgoliaResponse>('https://hn.algolia.com/api/v1/search?tags=front_page'),
+    fetchJson<AlgoliaResponse>(frontPageUrl.toString()),
     fetchJson<AlgoliaResponse>(recentUrl.toString()),
   ]);
 

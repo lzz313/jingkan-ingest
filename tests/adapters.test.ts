@@ -155,6 +155,23 @@ describe('Hacker News adapter', () => {
     expect(first.extra?.hnUrl).toContain('news.ycombinator.com');
     expect(items.some((item) => item.externalId === '50441707')).toBe(true);
   });
+
+  it('requests the whole front page instead of the default 20-hit slice', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      urls.push(url);
+      return new Response(fixture('hn.json'), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    await fetchHn();
+    const frontPage = urls.find((url) => url.includes('tags=front_page'));
+    expect(frontPage).toBeTruthy();
+    expect(new URL(frontPage!).searchParams.get('hitsPerPage')).toBe('50');
+  });
 });
 
 describe('GitHub Trending adapter', () => {
