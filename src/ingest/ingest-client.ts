@@ -5,6 +5,7 @@ import type {
   IngestResponse,
   IngestStatus,
   MaintenancePatch,
+  ModerateResponse,
   NormalizedItem,
   SourceId,
   TranslateField,
@@ -120,6 +121,22 @@ export async function fetchAdminUntranslated(
   if (!response.ok) throw new Error(`Admin untranslated failed: ${await readError(response)}`);
   const result = (await response.json()) as { items: AdminUntranslatedItem[] };
   return result.items;
+}
+
+export async function moderateItems(
+  config: IngestConfig,
+  limit = 60,
+): Promise<ModerateResponse> {
+  const response = await fetch(`${config.baseUrl}/api/admin/moderate`, {
+    method: 'POST',
+    headers: authHeaders(config),
+    body: JSON.stringify({ limit }),
+    // Up to three 20-post batches run at concurrency 2; give slow inference
+    // room without letting a hung call block the whole workflow.
+    signal: AbortSignal.timeout(150_000),
+  });
+  if (!response.ok) throw new Error(`Moderation failed: ${await readError(response)}`);
+  return (await response.json()) as ModerateResponse;
 }
 
 export async function postMaintenance(

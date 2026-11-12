@@ -175,6 +175,19 @@ export interface IngestRequest {
   sourceStatus?: Partial<Record<SourceId, IngestStatus>>;
 }
 
+export type ModerationReason = 'spam' | 'low_quality';
+
+export interface ModerateRequest {
+  limit?: number;
+}
+
+export interface ModerateResponse {
+  checked: number;
+  hidden: number;
+  remaining: number;
+  failed: number;
+}
+
 export interface AdminRecentItem {
   id: string;
   source: SourceId;
@@ -185,6 +198,9 @@ export interface AdminRecentItem {
   images: string[];
   publishedAt: number;
   hidden: boolean;
+  /** AI verdict: null = unchecked, 0 = keep, 1 = hide. */
+  aiFlag: number | null;
+  aiReason: string | null;
 }
 
 export interface MaintenancePatch {

@@ -34,6 +34,7 @@
 | --- | --- | --- |
 | `INGEST_TOKEN` | Secret | 与 Worker 的 `INGEST_TOKEN` secret 相同 |
 | `PREWARM_TRANSLATIONS` | Variable | 可选，设为 `0` 可关闭翻译预热与回填（HN 标题/正文、Reddit 标题、GitHub 简介） |
+| `AI_MODERATION` | Variable | 可选，设为 `0` 可关闭社区内容 AI 审核（V2EX / NodeSeek / LINUX DO） |
 
 Worker 地址直接写在 `.github/workflows/ingest.yml` 里（目前是 `https://jing.show`）；换自定义域名时同步修改即可。
 
@@ -47,9 +48,12 @@ npm run typecheck
 npm test
 JINGKAN_BASE_URL=http://127.0.0.1:8787 INGEST_TOKEN=<local-dev-token> npm run ingest
 JINGKAN_BASE_URL=http://127.0.0.1:8787 INGEST_TOKEN=<local-dev-token> npm run backfill
+JINGKAN_BASE_URL=http://127.0.0.1:8787 INGEST_TOKEN=<local-dev-token> npm run moderate
 ```
 
 `npm run backfill` 会补抓取轮次没翻完的 HN 标题和正文：最多 12 轮、每轮 20 条、8 分钟墙钟上限；workflow 在每次 ingest 之后自动执行，`continue-on-error`，失败不影响抓取结果。
+
+`npm run moderate` 在回填之后调用 Worker 的 `/api/admin/moderate`，分批审核 V2EX / NodeSeek / LINUX DO 的新条目：垃圾广告/引流和低质量水帖直接隐藏。最多 6 轮、每轮 60 条、3 分钟墙钟上限；连续两轮没有进展（例如 Workers AI 不可用）就停止。两次调用间隔里如果有新条目，会在下一轮 workflow 继续。
 
 ## 维护提示
 

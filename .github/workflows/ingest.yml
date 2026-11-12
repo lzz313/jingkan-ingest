@@ -53,3 +53,17 @@ jobs:
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
           PREWARM_TRANSLATIONS: ${{ vars.PREWARM_TRANSLATIONS || '1' }}
         run: npm run backfill
+
+      # Runs after the backfill: translation only covers HN/Reddit/GitHub, and
+      # putting moderation last keeps a slow model call from eating the
+      # translation budget. The script gates on AI_MODERATION, so the step is
+      # a no-op when the variable is 0 (GitHub also coerces unset to '0', so
+      # the gate lives in the script rather than an `if:`).
+      - name: Moderate community posts
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          JINGKAN_BASE_URL: https://jing.show
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+          AI_MODERATION: ${{ vars.AI_MODERATION || '1' }}
+        run: npm run moderate
