@@ -34,7 +34,7 @@
 | `INGEST_TOKEN` | Secret | 与 Worker 的 `INGEST_TOKEN` secret 相同 |
 | `PREWARM_TRANSLATIONS` | Variable | 可选，设为 `0` 可关闭 HN / GitHub 的翻译预热 |
 
-Worker 地址直接写在 `.github/workflows/ingest.yml` 里（目前是 `https://jingkan.lzz313-690.workers.dev`）；换自定义域名时同步修改即可。
+Worker 地址直接写在 `.github/workflows/ingest.yml` 里（目前是 `https://jing.show`）；换自定义域名时同步修改即可。
 
 `INGEST_TOKEN` 只保存在 GitHub Actions Secrets 中，不会随仓库公开。fork 的 Pull Request 默认拿不到该 secret。
 
