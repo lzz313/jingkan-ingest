@@ -6,6 +6,7 @@ import { shouldHideItem } from './spam';
 const MAX_TITLE = 320;
 const MAX_BODY = 30_000;
 const MAX_BRIEF = 400;
+const MAX_BODY_ZH = 8_000;
 
 export function normalizeItem(raw: NormalizedItem, now = Date.now()): NormalizedItem {
   if (!isSourceId(raw.source)) throw new Error(`Unknown source: ${raw.source}`);
@@ -49,6 +50,7 @@ export function normalizeItem(raw: NormalizedItem, now = Date.now()): Normalized
     body,
     brief,
     briefZh: raw.briefZh ? String(raw.briefZh).slice(0, MAX_BRIEF) : undefined,
+    bodyZh: raw.bodyZh ? String(raw.bodyZh).slice(0, MAX_BODY_ZH) : undefined,
     url,
     author: raw.author ? String(raw.author).slice(0, 120) : undefined,
     authorHandle: raw.authorHandle ? String(raw.authorHandle).slice(0, 120) : undefined,

@@ -52,6 +52,7 @@ export interface NormalizedItem {
   body?: string;
   brief?: string;
   briefZh?: string;
+  bodyZh?: string;
   url: string;
   author?: string;
   authorHandle?: string;
@@ -73,6 +74,7 @@ export interface FeedItem {
   body: string | null;
   brief: string | null;
   briefZh: string | null;
+  bodyZh: string | null;
   url: string;
   author: string | null;
   authorHandle: string | null;
@@ -191,9 +193,17 @@ export interface MaintenancePatch {
   images?: string[];
 }
 
+export type TranslateField = 'title' | 'brief' | 'body';
+
 export interface TranslateRequest {
   ids: string[];
-  field: 'title' | 'body';
+  field: TranslateField;
+}
+
+export interface AdminUntranslatedItem {
+  id: string;
+  needsTitle: boolean;
+  needsBody: boolean;
 }
 
 export interface TranslateResponse {

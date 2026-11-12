@@ -144,34 +144,137 @@ describe('LINUX DO adapter', () => {
 });
 
 describe('Hacker News adapter', () => {
-  it('parses Algolia stories and metrics', async () => {
-    stubFetch([{ match: 'hn.algolia.com/api/v1/search', file: 'hn.json', type: 'application/json' }]);
-    const items = await fetchHn();
-    expect(items).toHaveLength(3);
-    const first = items[0]!;
-    expect(first.source).toBe('hn');
-    expect(first.externalId).toMatch(/^\d+$/);
-    expect(first.metrics?.points).toBeGreaterThan(0);
-    expect(first.metrics?.comments).toBeGreaterThan(0);
-    expect(first.extra?.hnUrl).toContain('news.ycombinator.com');
-    expect(items.some((item) => item.externalId === '50441707')).toBe(true);
-  });
+  const newstories = JSON.parse(fixture('hn-newstories.json')) as number[];
+  const topstories = JSON.parse(fixture('hn-topstories.json')) as number[];
+  const hnItems = JSON.parse(fixture('hn-items.json')) as Record<number, unknown>;
 
-  it('requests the whole front page instead of the default 20-hit slice', async () => {
+  function story(id: number, title: string, time: number) {
+    return { id, type: 'story', by: 'tester', time, title, score: 10, descendants: 2 };
+  }
+
+  /** `null` makes a list endpoint fail; missing item ids 404. */
+  function stubHn(routes: {
+    newstories?: number[] | null;
+    topstories?: number[] | null;
+    items?: Record<number, unknown>;
+  }): string[] {
     const urls: string[] = [];
     vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
       const url =
         typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
       urls.push(url);
-      return new Response(fixture('hn.json'), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
+      const json = (value: unknown) =>
+        new Response(JSON.stringify(value), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      if (url.endsWith('/v0/newstories.json')) {
+        return routes.newstories ? json(routes.newstories) : new Response('failed', { status: 404 });
+      }
+      if (url.endsWith('/v0/topstories.json')) {
+        return routes.topstories ? json(routes.topstories) : new Response('failed', { status: 404 });
+      }
+      const match = url.match(/\/v0\/item\/(\d+)\.json$/);
+      if (match) {
+        const id = Number(match[1]);
+        if (routes.items && id in routes.items) return json(routes.items[id]);
+        return new Response('not found', { status: 404 });
+      }
+      return new Response('not found', { status: 404 });
     });
-    await fetchHn();
-    const frontPage = urls.find((url) => url.includes('tags=front_page'));
-    expect(frontPage).toBeTruthy();
-    expect(new URL(frontPage!).searchParams.get('hitsPerPage')).toBe('50');
+    return urls;
+  }
+
+  it('merges new and top stories, dedupes and sorts newest first', async () => {
+    const urls = stubHn({ newstories, topstories, items: hnItems });
+    const items = await fetchHn();
+
+    expect(items.map((item) => item.externalId)).toEqual([
+      '50450003',
+      '50450004',
+      '50442736',
+      '50441707',
+    ]);
+    expect(urls.filter((url) => url.includes('/v0/item/50441707.json'))).toHaveLength(1);
+    expect(urls.some((url) => url.endsWith('/v0/newstories.json'))).toBe(true);
+    expect(urls.some((url) => url.endsWith('/v0/topstories.json'))).toBe(true);
+  });
+
+  it('maps score, comments, body and the HN item URL fallback', async () => {
+    stubHn({ newstories, topstories, items: hnItems });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const items = await fetchHn();
+
+    const link = items.find((item) => item.externalId === '50441707');
+    expect(link?.metrics?.points).toBe(904);
+    expect(link?.metrics?.comments).toBe(322);
+
+    const self = items.find((item) => item.externalId === '50442736');
+    expect(self?.url).toBe('https://news.ycombinator.com/item?id=50442736');
+    expect(self?.body).toContain('Previously');
+    expect(self?.brief).toBeTruthy();
+    expect(self?.extra?.hnUrl).toBe('https://news.ycombinator.com/item?id=50442736');
+
+    const ask = items.find((item) => item.externalId === '50450004');
+    expect(ask?.body).toContain('Ask body text');
+  });
+
+  it('filters deleted, dead, job and failed items', async () => {
+    stubHn({ newstories, topstories, items: hnItems });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const items = await fetchHn();
+
+    expect(items.map((item) => item.externalId).sort()).toEqual([
+      '50441707',
+      '50442736',
+      '50450003',
+      '50450004',
+    ]);
+    // Deleted, dead, job and the 404 item are all skipped.
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it('caps the lists at 30 new and 40 top ids', async () => {
+    const newIds = Array.from({ length: 100 }, (_, index) => index + 1);
+    const topIds = Array.from({ length: 100 }, (_, index) => index + 1001);
+    const items = Object.fromEntries(
+      [...newIds, ...topIds].map((id) => [id, story(id, `s${id}`, id)]),
+    );
+    const urls = stubHn({ newstories: newIds, topstories: topIds, items });
+
+    const result = await fetchHn();
+    expect(result).toHaveLength(70);
+
+    const fetched = urls
+      .map((url) => url.match(/\/v0\/item\/(\d+)\.json$/))
+      .filter((match): match is RegExpMatchArray => Boolean(match))
+      .map((match) => Number(match[1]));
+    expect(new Set(fetched).size).toBe(70);
+    expect(fetched).toContain(1);
+    expect(fetched).toContain(30);
+    expect(fetched).not.toContain(31);
+    expect(fetched).toContain(1040);
+    expect(fetched).not.toContain(1041);
+  });
+
+  it('continues when one list fails', async () => {
+    stubHn({ newstories, topstories: null, items: hnItems });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const items = await fetchHn();
+    // Only the two valid new-story ids remain.
+    expect(items.map((item) => item.externalId).sort()).toEqual(['50441707', '50450003']);
+  });
+
+  it('rejects when both lists fail', async () => {
+    stubHn({ newstories: null, topstories: null });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(fetchHn()).rejects.toThrow('HTTP 404');
+  });
+
+  it('rejects when every story is unusable', async () => {
+    stubHn({ newstories: [50450002], topstories: [], items: hnItems });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(fetchHn()).rejects.toThrow('Hacker News returned no stories');
   });
 });
 

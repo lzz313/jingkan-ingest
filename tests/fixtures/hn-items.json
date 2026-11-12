@@ -1,0 +1,63 @@
+{
+  "50450003": {
+    "id": 50450003,
+    "type": "story",
+    "by": "alice",
+    "time": 1794700000,
+    "title": "Newest story",
+    "url": "https://example.com/newest",
+    "score": 12,
+    "descendants": 0
+  },
+  "50450002": {
+    "id": 50450002,
+    "deleted": true,
+    "type": "story"
+  },
+  "50450001": {
+    "id": 50450001,
+    "dead": true,
+    "type": "story",
+    "by": "dead",
+    "time": 1794600000,
+    "title": "Dead story"
+  },
+  "50441707": {
+    "id": 50441707,
+    "type": "story",
+    "by": "skittleson",
+    "time": 1794324320,
+    "title": "Smart home devices should work without the internet",
+    "url": "https://docodethatmatters.com/home-automation-overnight-success/",
+    "score": 904,
+    "descendants": 322
+  },
+  "50442736": {
+    "id": 50442736,
+    "type": "story",
+    "by": "p4bl0",
+    "time": 1794328664,
+    "title": ".name Grandfathered",
+    "text": "<p>Previously: <i>.name Termination</i></p>",
+    "score": 812,
+    "descendants": 177
+  },
+  "50439193": {
+    "id": 50439193,
+    "type": "job",
+    "by": "jobs",
+    "time": 1794312672,
+    "title": "We are hiring",
+    "score": 1
+  },
+  "50450004": {
+    "id": 50450004,
+    "type": "story",
+    "by": "bob",
+    "time": 1794600000,
+    "title": "Ask HN: How do you test ingestion?",
+    "text": "<p>Ask body text</p>",
+    "score": 5,
+    "descendants": 2
+  }
+}

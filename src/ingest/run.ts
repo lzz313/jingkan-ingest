@@ -133,10 +133,16 @@ async function main(): Promise<void> {
       .filter((item) => item.source === 'github' && !item.briefZh)
       .slice(0, 20)
       .map((item) => `${item.source}:${item.externalId}`);
+    // Only Ask/Show HN posts carry text; link posts have no body to translate.
+    const hnBodyIds = successfulItems
+      .filter((item) => item.source === 'hn' && item.body?.trim() && !item.bodyZh)
+      .slice(0, 20)
+      .map((item) => `${item.source}:${item.externalId}`);
 
     for (const [field, ids] of [
       ['title', titleIds],
-      ['body', githubIds],
+      ['body', hnBodyIds],
+      ['brief', githubIds],
     ] as const) {
       if (ids.length === 0) continue;
       try {

@@ -1,11 +1,13 @@
 import type {
   AdminRecentItem,
+  AdminUntranslatedItem,
   IngestRequest,
   IngestResponse,
   IngestStatus,
   MaintenancePatch,
   NormalizedItem,
   SourceId,
+  TranslateField,
   TranslateResponse,
 } from '../shared/types';
 import type { IngestConfig } from './env';
@@ -72,16 +74,20 @@ export async function postIngest(
 export async function prewarmTranslations(
   config: IngestConfig,
   ids: string[],
-  field: 'title' | 'body',
+  field: TranslateField,
 ): Promise<TranslateResponse> {
   const translations: Record<string, string> = {};
-  for (let i = 0; i < ids.length; i += 10) {
-    const chunk = ids.slice(i, i + 10);
+  // Body translations are much longer than titles and briefs; smaller chunks
+  // and a longer client timeout keep one slow item from failing the batch.
+  const chunkSize = field === 'body' ? 5 : 10;
+  const timeoutMs = field === 'body' ? 120_000 : 90_000;
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
     const response = await fetch(`${config.baseUrl}/api/translate`, {
       method: 'POST',
       headers: authHeaders(config),
       body: JSON.stringify({ ids: chunk, field }),
-      signal: AbortSignal.timeout(90_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) throw new Error(`Translate prewarm failed: ${await readError(response)}`);
     const result = (await response.json()) as TranslateResponse;
@@ -100,6 +106,19 @@ export async function fetchAdminRecent(
   });
   if (!response.ok) throw new Error(`Admin recent failed: ${await readError(response)}`);
   const result = (await response.json()) as { items: AdminRecentItem[] };
+  return result.items;
+}
+
+export async function fetchAdminUntranslated(
+  config: IngestConfig,
+  limit = 20,
+): Promise<AdminUntranslatedItem[]> {
+  const response = await fetch(`${config.baseUrl}/api/admin/untranslated?limit=${limit}`, {
+    headers: authHeaders(config),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error(`Admin untranslated failed: ${await readError(response)}`);
+  const result = (await response.json()) as { items: AdminUntranslatedItem[] };
   return result.items;
 }
 
