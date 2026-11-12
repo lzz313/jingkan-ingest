@@ -154,11 +154,9 @@ function mapEntry(raw: XmlNode, index: number): NormalizedItem | null {
 
 export async function fetchReddit(): Promise<NormalizedItem[]> {
   // One request per run: retrying a 429 immediately only burns the quota.
-  const xml = await fetchText(REDDIT_FEED_URL, {
-    retries: 0,
-    timeoutMs: 25_000,
-    headers: { accept: 'application/atom+xml, application/xml;q=0.9, */*;q=0.8' },
-  });
+  // Keep the default `*/*` Accept header: the probes that succeeded used it,
+  // while the only failed run (westus2) sent an Atom-specific one.
+  const xml = await fetchText(REDDIT_FEED_URL, { retries: 0, timeoutMs: 25_000 });
 
   const parsed = parser.parse(xml) as Record<string, unknown>;
   const feed = parsed.feed as Record<string, unknown> | undefined;
