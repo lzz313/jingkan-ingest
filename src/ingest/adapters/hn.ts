@@ -39,7 +39,10 @@ function mapItem(item: FirebaseHnItem | null): NormalizedItem | null {
   const title = stripHtml(item.title);
   if (!title) return null;
   const hnUrl = `https://news.ycombinator.com/item?id=${id}`;
-  const url = item.url || hnUrl;
+  // Cards link to the Y Combinator discussion, not the submitted article.
+  // Keep hashing (and resolving images against) the article URL so a story
+  // that has not changed keeps the same content hash across this switch.
+  const sourceUrl = item.url || hnUrl;
   const body = stripHtml(item.text ?? '');
 
   return {
@@ -48,19 +51,19 @@ function mapItem(item: FirebaseHnItem | null): NormalizedItem | null {
     title,
     body,
     brief: firstSentences(body, 170),
-    url,
+    url: hnUrl,
     author: item.by,
     publishedAt: (item.time as number) * 1000,
     metrics: {
       points: item.score ?? 0,
       comments: item.descendants ?? 0,
     },
-    images: extractImages(item.text, url),
+    images: extractImages(item.text, sourceUrl),
     extra: {
       hnUrl,
       timeSource: 'post',
     },
-    contentHash: hashText(`${title}\n${body}\n${url}`),
+    contentHash: hashText(`${title}\n${body}\n${sourceUrl}`),
   };
 }
 

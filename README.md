@@ -8,7 +8,7 @@
 - V2EX
 - NodeSeek
 - LINUX DO
-- Hacker News
+- Hacker News（卡片链接使用 YC 讨论页，历史条目保留原链接）
 - GitHub Trending
 - Reddit（r/programming / r/technology / r/LocalLLaMA / r/webdev 合并热榜，RSS）
 

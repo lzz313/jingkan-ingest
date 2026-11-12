@@ -208,6 +208,10 @@ describe('Hacker News adapter', () => {
     const link = items.find((item) => item.externalId === '50441707');
     expect(link?.metrics?.points).toBe(904);
     expect(link?.metrics?.comments).toBe(322);
+    // The card must link to the discussion even though the story has an
+    // external article URL.
+    expect(link?.url).toBe('https://news.ycombinator.com/item?id=50441707');
+    expect(link?.extra?.hnUrl).toBe('https://news.ycombinator.com/item?id=50441707');
 
     const self = items.find((item) => item.externalId === '50442736');
     expect(self?.url).toBe('https://news.ycombinator.com/item?id=50442736');
