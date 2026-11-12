@@ -44,7 +44,9 @@ jobs:
         run: npm run ingest
 
       - name: Backfill translations
-        if: ${{ vars.PREWARM_TRANSLATIONS != '0' }}
+        # An unset variable compares equal to '0' after GitHub's numeric
+        # coercion, so test for empty explicitly; the script also gates.
+        if: ${{ vars.PREWARM_TRANSLATIONS == '' || vars.PREWARM_TRANSLATIONS != '0' }}
         continue-on-error: true
         env:
           JINGKAN_BASE_URL: https://jing.show
