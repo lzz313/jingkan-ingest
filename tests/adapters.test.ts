@@ -22,13 +22,28 @@ function stubFetch(routes: Array<{ match: string; file: string; type: string }>)
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('V2EX adapter', () => {
-  it('maps topics, bodies and images', async () => {
-    stubFetch([{ match: 'api/topics/latest.json', file: 'v2ex.json', type: 'application/json' }]);
+  it('merges hot and latest, letting live hot metrics win', async () => {
+    stubFetch([
+      { match: 'api/topics/hot.json', file: 'v2ex-hot.json', type: 'application/json' },
+      { match: 'api/topics/latest.json', file: 'v2ex.json', type: 'application/json' },
+    ]);
     const items = await fetchV2ex();
-    expect(items).toHaveLength(3);
+    // Three unique latest topics plus one hot-only topic; the duplicated id
+    // must not appear twice.
+    expect(items).toHaveLength(4);
+    expect(new Set(items.map((item) => item.externalId)).size).toBe(4);
+
+    const merged = items.find((item) => item.externalId === '1256220');
+    expect(merged?.metrics?.replies).toBe(110);
+
+    const hotOnly = items.find((item) => item.externalId === '9000001');
+    expect(hotOnly?.title).toContain('热议');
+    expect(hotOnly?.metrics?.replies).toBe(189);
+
     const first = items[0]!;
     expect(first.source).toBe('v2ex');
     expect(first.externalId).toMatch(/^\d+$/);
@@ -37,6 +52,19 @@ describe('V2EX adapter', () => {
     expect(first.publishedAt).toBeGreaterThan(1_700_000_000_000);
     expect(first.metrics?.replies).toBeGreaterThanOrEqual(0);
     expect(first.url).toMatch(/^https:\/\/www\.v2ex\.com\/t\//);
+  });
+
+  it('falls back to latest when the hot endpoint fails', async () => {
+    stubFetch([{ match: 'api/topics/latest.json', file: 'v2ex.json', type: 'application/json' }]);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const items = await fetchV2ex();
+    expect(items).toHaveLength(3);
+  });
+
+  it('rejects only when both endpoints fail', async () => {
+    stubFetch([]);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(fetchV2ex()).rejects.toThrow('V2EX hot and latest both failed');
   });
 });
 
@@ -132,7 +160,9 @@ describe('Hacker News adapter', () => {
 describe('GitHub Trending adapter', () => {
   it('parses repository cards and stars today', async () => {
     stubFetch([{ match: 'github.com/trending', file: 'github.html', type: 'text/html' }]);
-    const items = await fetchGithub();
+    // 2026-11-12 16:35 Beijing; the day starts at 2026-11-11T16:00Z.
+    const fixedNow = Date.UTC(2026, 10, 12, 8, 35);
+    const items = await fetchGithub(fixedNow);
     expect(items).toHaveLength(2);
     const first = items[0]!;
     expect(first.source).toBe('github');
@@ -140,6 +170,23 @@ describe('GitHub Trending adapter', () => {
     expect(first.metrics?.starsToday).toBeGreaterThan(0);
     expect(first.extra?.lang).toBeTruthy();
     expect(first.url).toBe(`https://github.com/${first.externalId}`);
+
+    // Trending order survives through publishedAt, and the whole block sits
+    // inside the current Beijing day instead of tracking "now" on every run.
+    const dayStart = Date.UTC(2026, 10, 11, 16, 0);
+    expect(items.every((item) => item.publishedAt >= dayStart)).toBe(true);
+    expect(items.every((item) => item.publishedAt < fixedNow)).toBe(true);
+    expect(first.publishedAt).toBeGreaterThan(items[1]!.publishedAt);
+    expect(first.publishedAt - items[1]!.publishedAt).toBe(60_000);
+  });
+
+  it('never stamps a repo in the future just after Beijing midnight', async () => {
+    stubFetch([{ match: 'github.com/trending', file: 'github.html', type: 'text/html' }]);
+    // 2026-11-12 00:00:30 Beijing.
+    const fixedNow = Date.UTC(2026, 10, 11, 16, 0, 30);
+    const items = await fetchGithub(fixedNow);
+    expect(items.every((item) => item.publishedAt < fixedNow)).toBe(true);
+    expect(items.every((item) => item.publishedAt >= fixedNow - 60_000)).toBe(true);
   });
 });
 
