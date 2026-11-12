@@ -60,6 +60,8 @@ jobs:
       # a no-op when the variable is 0 (GitHub also coerces unset to '0', so
       # the gate lives in the script rather than an `if:`).
       - name: Moderate community posts
+        # Backlog still deserves moderation when the ingest step fails.
+        if: ${{ always() }}
         continue-on-error: true
         timeout-minutes: 5
         env:
