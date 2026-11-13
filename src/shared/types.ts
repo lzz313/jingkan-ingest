@@ -111,6 +111,7 @@ export interface SourceCounts {
 }
 
 export interface FeedResponse {
+  snapshotId?: string;
   items: FeedItem[];
   nextCursor: string | null;
   counts: SourceCounts;
@@ -145,6 +146,7 @@ export interface SourceStatus {
 }
 
 export interface MetaResponse {
+  snapshotId?: string;
   lastUpdated: number;
   dataVersion: number;
   lastRefreshAt: number;
