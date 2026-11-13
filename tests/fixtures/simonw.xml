@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Simon Willison</title>
+  <entry>
+    <title>Gemini Decisions API</title>
+    <link href="https://simonwillison.net/2026/Nov/13/gemini-decisions/" rel="alternate" />
+    <id>tag:simonwillison.net,2026:gemini-decisions</id>
+    <published>2026-11-13T08:00:00+00:00</published>
+    <updated>2026-11-13T08:00:00+00:00</updated>
+    <summary>&lt;p&gt;A practical look at the new Gemini Decisions API. The examples compare latency and calibration.&lt;/p&gt;</summary>
+    <category term="ai" />
+    <category term="gemini" />
+  </entry>
+  <entry>
+    <title>CSS layout notes</title>
+    <link href="https://simonwillison.net/2026/Nov/13/css-layout/" rel="alternate" />
+    <id>tag:simonwillison.net,2026:css-layout</id>
+    <published>2026-11-13T07:00:00+00:00</published>
+    <updated>2026-11-13T07:00:00+00:00</updated>
+    <summary>&lt;p&gt;This post is not related to AI.&lt;/p&gt;</summary>
+    <category term="css" />
+  </entry>
+  <entry>
+    <title>An old model release</title>
+    <link href="https://simonwillison.net/2025/Jan/1/old-model/" rel="alternate" />
+    <id>tag:simonwillison.net,2025:old-model</id>
+    <published>2025-01-01T08:00:00+00:00</published>
+    <updated>2025-01-01T08:00:00+00:00</updated>
+    <summary>&lt;p&gt;Old AI news.&lt;/p&gt;</summary>
+    <category term="ai" />
+  </entry>
+</feed>

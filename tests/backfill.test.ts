@@ -4,6 +4,7 @@ import { backfillTranslations } from '../src/ingest/backfill';
 interface PendingItem {
   id: string;
   needsTitle: boolean;
+  needsBrief?: boolean;
   needsBody: boolean;
 }
 
@@ -30,11 +31,12 @@ afterEach(() => {
 });
 
 describe('translation backfill', () => {
-  it('translates titles and bodies, then stops when the queue drains', async () => {
+  it('translates titles, briefs and bodies, then stops when the queue drains', async () => {
     const batches: PendingItem[][] = [
       [
-        { id: 'hn:1', needsTitle: true, needsBody: true },
-        { id: 'hn:2', needsTitle: true, needsBody: false },
+        { id: 'hn:1', needsTitle: true, needsBrief: false, needsBody: true },
+        { id: 'hn:2', needsTitle: true, needsBrief: false, needsBody: false },
+        { id: 'hf-papers:1', needsTitle: false, needsBrief: true, needsBody: false },
       ],
       [],
     ];
@@ -58,9 +60,10 @@ describe('translation backfill', () => {
 
     const result = await backfillTranslations(CONFIG, { now: () => 0 });
     expect(adminCalls).toBe(2);
-    expect(result).toEqual({ rounds: 1, translated: 3, remaining: 0 });
+    expect(result).toEqual({ rounds: 1, translated: 4, remaining: 0 });
     expect(translateCalls).toEqual([
       { ids: ['hn:1', 'hn:2'], field: 'title' },
+      { ids: ['hf-papers:1'], field: 'brief' },
       { ids: ['hn:1'], field: 'body' },
     ]);
   });
@@ -74,7 +77,7 @@ describe('translation backfill', () => {
         adminCalls++;
         return json({
           items: [
-            { id: 'hn:1', needsTitle: adminCalls === 1, needsBody: true },
+            { id: 'hn:1', needsTitle: adminCalls === 1, needsBrief: false, needsBody: true },
           ],
         });
       }
@@ -106,7 +109,9 @@ describe('translation backfill', () => {
       const url = urlOf(input);
       if (url.includes('/api/admin/untranslated')) {
         adminCalls++;
-        return json({ items: [{ id: 'hn:1', needsTitle: true, needsBody: false }] });
+        return json({
+          items: [{ id: 'hn:1', needsTitle: true, needsBrief: false, needsBody: false }],
+        });
       }
       const body = JSON.parse(String(init?.body)) as { ids: string[] };
       return json({ translations: Object.fromEntries(body.ids.map((id) => [id, '译'])) });

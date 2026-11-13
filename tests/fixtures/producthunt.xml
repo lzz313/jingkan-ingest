@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Product Hunt</title>
+  <entry>
+    <id>tag:www.producthunt.com,2005:Post/1308353</id>
+    <published>2026-11-13T08:00:00-08:00</published>
+    <updated>2026-11-13T09:00:00-08:00</updated>
+    <link rel="alternate" type="text/html" href="https://www.producthunt.com/products/youart" />
+    <title>YouArt Desktop App</title>
+    <content type="html">&lt;p&gt;Codex for creative teams&lt;/p&gt;&lt;p&gt;&lt;a&gt;Discussion&lt;/a&gt; | &lt;a&gt;Link&lt;/a&gt;&lt;/p&gt;</content>
+    <author><name /></author>
+  </entry>
+  <entry>
+    <id>tag:www.producthunt.com,2005:Post/1</id>
+    <published>2025-01-01T08:00:00-08:00</published>
+    <updated>2025-01-01T09:00:00-08:00</updated>
+    <link rel="alternate" type="text/html" href="https://www.producthunt.com/products/old" />
+    <title>Old product</title>
+    <content type="html">&lt;p&gt;An old launch&lt;/p&gt;</content>
+  </entry>
+</feed>

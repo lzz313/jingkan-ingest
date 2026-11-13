@@ -36,6 +36,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
       - name: Fetch and write to D1
         env:
           JINGKAN_BASE_URL: https://jing.show
@@ -54,8 +60,8 @@ jobs:
           PREWARM_TRANSLATIONS: ${{ vars.PREWARM_TRANSLATIONS || '1' }}
         run: npm run backfill
 
-      # Runs after the backfill: translation only covers HN/Reddit/GitHub, and
-      # putting moderation last keeps a slow model call from eating the
+      # Runs after translation backfill for HN/Reddit/GitHub and AI sources.
+      # Putting moderation last keeps a slow model call from eating the
       # translation budget. The script gates on AI_MODERATION, so the step is
       # a no-op when the variable is 0 (GitHub also coerces unset to '0', so
       # the gate lives in the script rather than an `if:`).

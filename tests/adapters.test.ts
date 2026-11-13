@@ -4,7 +4,11 @@ import { fetchNodeseek } from '../src/ingest/adapters/nodeseek';
 import { fetchLinuxDo, parseReaderMarkdown } from '../src/ingest/adapters/linuxdo';
 import { fetchHn } from '../src/ingest/adapters/hn';
 import { fetchGithub } from '../src/ingest/adapters/github';
+import { fetchGoogleAi } from '../src/ingest/adapters/google-ai';
 import { fetchReddit } from '../src/ingest/adapters/reddit';
+import { fetchHuggingFacePapers } from '../src/ingest/adapters/huggingface';
+import { fetchProductHunt } from '../src/ingest/adapters/producthunt';
+import { fetchSimonW } from '../src/ingest/adapters/simonw';
 import { fetchX } from '../src/ingest/adapters/x';
 import { fixture } from './helpers';
 
@@ -381,5 +385,73 @@ describe('Reddit adapter', () => {
   it('rejects an unexpected payload instead of reporting an empty success', async () => {
     vi.stubGlobal('fetch', async () => new Response('<html>blocked</html>', { status: 200 }));
     await expect(fetchReddit()).rejects.toThrow('unexpected feed');
+  });
+});
+
+describe('AI and product adapters', () => {
+  const now = Date.UTC(2026, 10, 13, 20, 0);
+
+  it('maps Hugging Face daily papers and excludes old entries', async () => {
+    stubFetch([
+      {
+        match: 'huggingface.co/api/daily_papers',
+        file: 'huggingface-daily.json',
+        type: 'application/json',
+      },
+    ]);
+    const items = await fetchHuggingFacePapers(now);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.source).toBe('hf-papers');
+    expect(items[0]!.metrics).toEqual({ upvotes: 42, comments: 6 });
+    expect(items[0]!.extra?.arxivUrl).toBe('https://arxiv.org/abs/2611.16321');
+    expect(items[0]!.images?.some((url) => url.includes('cdn-thumbnails.huggingface.co'))).toBe(true);
+  });
+
+  it('keeps only recent AI-tagged Simon Willison entries', async () => {
+    stubFetch([
+      {
+        match: 'simonwillison.net/atom/everything',
+        file: 'simonw.xml',
+        type: 'application/atom+xml',
+      },
+    ]);
+    const items = await fetchSimonW(now);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.source).toBe('simonw');
+    expect(items[0]!.title).toBe('Gemini Decisions API');
+    expect(items[0]!.extra?.category).toBe('ai');
+  });
+
+  it('parses Google AI summaries, authors and images', async () => {
+    stubFetch([
+      {
+        match: 'blog.google/innovation-and-ai/technology/ai/rss',
+        file: 'google-ai.xml',
+        type: 'application/rss+xml',
+      },
+    ]);
+    const items = await fetchGoogleAi(now);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.source).toBe('google-ai');
+    expect(items[0]!.author).toBe('Example Author');
+    expect(items[0]!.extra?.category).toBe('Developer tools');
+    expect(items[0]!.body).not.toContain('decorative image alt');
+    expect(items[0]!.images?.some((url) => url.includes('storage.googleapis.com'))).toBe(true);
+  });
+
+  it('cleans Product Hunt taglines and keeps all recent products', async () => {
+    stubFetch([
+      {
+        match: 'producthunt.com/feed',
+        file: 'producthunt.xml',
+        type: 'application/atom+xml',
+      },
+    ]);
+    const items = await fetchProductHunt(now);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.source).toBe('producthunt');
+    expect(items[0]!.externalId).toBe('youart');
+    expect(items[0]!.body).toBe('Codex for creative teams');
+    expect(items[0]!.body).not.toContain('Discussion');
   });
 });

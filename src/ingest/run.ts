@@ -1,13 +1,22 @@
 import { appendFileSync } from 'node:fs';
 import type { IngestStatus, NormalizedItem, SourceId } from '../shared/types';
-import { SOURCES } from '../shared/sources';
+import {
+  SOURCE_ORDER,
+  SOURCES,
+  sourceNeedsBriefTranslation,
+  sourceNeedsTitleTranslation,
+} from '../shared/sources';
 import { extractImages } from '../shared/html';
 import { shouldHideItem } from '../shared/spam';
 import { fetchGithub } from './adapters/github';
+import { fetchGoogleAi } from './adapters/google-ai';
 import { fetchHn } from './adapters/hn';
+import { fetchHuggingFacePapers } from './adapters/huggingface';
 import { fetchLinuxDo } from './adapters/linuxdo';
 import { fetchNodeseek } from './adapters/nodeseek';
+import { fetchProductHunt } from './adapters/producthunt';
 import { fetchReddit } from './adapters/reddit';
+import { fetchSimonW } from './adapters/simonw';
 import { fetchV2ex } from './adapters/v2ex';
 import { fetchX } from './adapters/x';
 import { loadConfig } from './env';
@@ -32,6 +41,10 @@ const ADAPTERS: Adapter[] = [
   { source: 'hn', run: fetchHn },
   { source: 'github', run: fetchGithub },
   { source: 'reddit', run: fetchReddit },
+  { source: 'hf-papers', run: fetchHuggingFacePapers },
+  { source: 'simonw', run: fetchSimonW },
+  { source: 'google-ai', run: fetchGoogleAi },
+  { source: 'producthunt', run: fetchProductHunt },
 ];
 
 function log(message: string): void {
@@ -49,6 +62,35 @@ function prepare(raw: NormalizedItem[], now: number): NormalizedItem[] {
     }
   }
   return [...byId.values()];
+}
+
+function fairTranslationIds(
+  items: NormalizedItem[],
+  needsField: (source: SourceId) => boolean,
+  needsValue: (item: NormalizedItem) => boolean,
+  limit = 30,
+): string[] {
+  const pools = new Map<SourceId, string[]>();
+  for (const item of items) {
+    if (!needsField(item.source) || !needsValue(item)) continue;
+    const pool = pools.get(item.source) ?? [];
+    pool.push(`${item.source}:${item.externalId}`);
+    pools.set(item.source, pool);
+  }
+
+  const ids: string[] = [];
+  for (let index = 0; ids.length < limit; index++) {
+    let added = false;
+    for (const source of SOURCE_ORDER) {
+      const id = pools.get(source)?.[index];
+      if (!id) continue;
+      ids.push(id);
+      added = true;
+      if (ids.length >= limit) break;
+    }
+    if (!added) break;
+  }
+  return ids;
 }
 
 async function maintain(config: ReturnType<typeof loadConfig>): Promise<void> {
@@ -116,23 +158,16 @@ async function main(): Promise<void> {
   }
 
   if (config.prewarmTranslations) {
-    const pendingTitles = successfulItems.filter(
-      (item) => (item.source === 'hn' || item.source === 'reddit') && !item.titleZh,
+    const titleIds = fairTranslationIds(
+      successfulItems,
+      sourceNeedsTitleTranslation,
+      (item) => !item.titleZh,
     );
-    const hnTitles = pendingTitles.filter((item) => item.source === 'hn');
-    const redditTitles = pendingTitles.filter((item) => item.source === 'reddit');
-    // Alternate sources so a busy HN front page cannot starve Reddit titles.
-    const titleIds: string[] = [];
-    for (let index = 0; index < Math.max(hnTitles.length, redditTitles.length); index++) {
-      for (const pool of [hnTitles, redditTitles]) {
-        const item = pool[index];
-        if (item && titleIds.length < 20) titleIds.push(`${item.source}:${item.externalId}`);
-      }
-    }
-    const githubIds = successfulItems
-      .filter((item) => item.source === 'github' && !item.briefZh)
-      .slice(0, 20)
-      .map((item) => `${item.source}:${item.externalId}`);
+    const briefIds = fairTranslationIds(
+      successfulItems,
+      sourceNeedsBriefTranslation,
+      (item) => !item.briefZh && Boolean((item.brief || item.body)?.trim()),
+    );
     // Only Ask/Show HN posts carry text; link posts have no body to translate.
     const hnBodyIds = successfulItems
       .filter((item) => item.source === 'hn' && item.body?.trim() && !item.bodyZh)
@@ -142,7 +177,7 @@ async function main(): Promise<void> {
     for (const [field, ids] of [
       ['title', titleIds],
       ['body', hnBodyIds],
-      ['brief', githubIds],
+      ['brief', briefIds],
     ] as const) {
       if (ids.length === 0) continue;
       try {

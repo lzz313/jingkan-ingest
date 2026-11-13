@@ -1,0 +1,31 @@
+[
+  {
+    "paper": {
+      "id": "2611.16321",
+      "title": "Efficient Adaptive Models",
+      "summary": "A fresh paper about adaptive computation. It shares intermediate layers and reduces inference cost.",
+      "publishedAt": "2026-11-12T00:00:00.000Z",
+      "submittedOnDailyAt": "2026-11-13T00:00:00.000Z",
+      "upvotes": 42,
+      "authors": [{ "name": "Ada Example" }],
+      "githubRepo": "https://github.com/example/adaptive"
+    },
+    "publishedAt": "2026-11-12T18:00:00.000Z",
+    "thumbnail": "https://cdn-thumbnails.huggingface.co/social-thumbnails/papers/2611.16321.png",
+    "numComments": 6,
+    "submittedBy": { "name": "paper-fan" }
+  },
+  {
+    "paper": {
+      "id": "2601.00001",
+      "title": "An Old Paper",
+      "summary": "This entry is outside the 48 hour window.",
+      "publishedAt": "2025-01-01T00:00:00.000Z",
+      "submittedOnDailyAt": "2025-01-02T00:00:00.000Z",
+      "upvotes": 99,
+      "authors": []
+    },
+    "publishedAt": "2025-01-02T00:00:00.000Z",
+    "numComments": 1
+  }
+]

@@ -1,4 +1,16 @@
-export const SOURCE_IDS = ['x', 'v2ex', 'nodeseek', 'linuxdo', 'hn', 'github', 'reddit'] as const;
+export const SOURCE_IDS = [
+  'x',
+  'v2ex',
+  'nodeseek',
+  'linuxdo',
+  'hn',
+  'github',
+  'reddit',
+  'hf-papers',
+  'simonw',
+  'google-ai',
+  'producthunt',
+] as const;
 export type SourceId = (typeof SOURCE_IDS)[number];
 
 export interface ItemMetrics {
@@ -8,6 +20,7 @@ export interface ItemMetrics {
   replies?: number;
   points?: number;
   comments?: number;
+  upvotes?: number;
   starsToday?: number;
   starsTotal?: number;
   posts?: number;
@@ -219,6 +232,7 @@ export interface TranslateRequest {
 export interface AdminUntranslatedItem {
   id: string;
   needsTitle: boolean;
+  needsBrief: boolean;
   needsBody: boolean;
 }
 

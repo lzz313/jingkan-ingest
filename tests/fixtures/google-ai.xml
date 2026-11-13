@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+  <channel>
+    <title>AI</title>
+    <link>https://blog.google/innovation-and-ai/technology/ai/</link>
+    <description>AI</description>
+    <item>
+      <title>Gemini Decisions API</title>
+      <link>https://blog.google/innovation-and-ai/technology/developers-tools/gemini-decisions-api/</link>
+      <media:content url="https://storage.googleapis.com/example/gemini.webp" medium="image" />
+      <media:description>A decorative image alt description</media:description>
+      <description>&lt;img src="https://storage.googleapis.com/example/gemini.webp"&gt;Meet the Gemini Decisions API for fast multimodal decisions.</description>
+      <pubDate>Fri, 13 Nov 2026 08:00:00 +0000</pubDate>
+      <guid>https://blog.google/innovation-and-ai/technology/developers-tools/gemini-decisions-api/</guid>
+      <category>Developer tools</category>
+      <category>AI</category>
+      <author><name>Example Author</name></author>
+    </item>
+    <item>
+      <title>An old Google AI post</title>
+      <link>https://blog.google/example/old/</link>
+      <description>Old news.</description>
+      <pubDate>Wed, 01 Jan 2025 08:00:00 +0000</pubDate>
+      <guid>https://blog.google/example/old/</guid>
+      <category>AI</category>
+    </item>
+  </channel>
+</rss>

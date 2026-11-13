@@ -11,6 +11,13 @@
 - Hacker News（卡片链接使用 YC 讨论页，历史条目保留原链接）
 - GitHub Trending
 - Reddit（r/programming / r/technology / r/LocalLLaMA / r/webdev 合并热榜，RSS）
+- Hugging Face Daily Papers（官方 JSON）
+- Simon Willison（Atom，只保留 AI 相关标签）
+- Google AI Blog（官方 RSS）
+- Product Hunt（公开 Atom，收录全部新品）
+
+新增的 AI 与产品来源只回填最近 48 小时内容。Hugging Face 使用赞同 / 评论参与热点；
+Simon Willison、Google AI 和 Product Hunt 没有可靠的互动指标，因此只进入最新视图。
 
 ## 定时安排
 
@@ -33,7 +40,7 @@
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
 | `INGEST_TOKEN` | Secret | 与 Worker 的 `INGEST_TOKEN` secret 相同 |
-| `PREWARM_TRANSLATIONS` | Variable | 可选，设为 `0` 可关闭翻译预热与回填（HN 标题/正文、Reddit 标题、GitHub 简介） |
+| `PREWARM_TRANSLATIONS` | Variable | 可选，设为 `0` 可关闭翻译预热与回填（HN 标题/正文、Reddit 标题、GitHub 简介、AI 来源标题/摘要） |
 | `AI_MODERATION` | Variable | 可选，设为 `0` 可关闭社区内容 AI 审核（V2EX / NodeSeek / LINUX DO） |
 
 Worker 地址直接写在 `.github/workflows/ingest.yml` 里（目前是 `https://jing.show`）；换自定义域名时同步修改即可。

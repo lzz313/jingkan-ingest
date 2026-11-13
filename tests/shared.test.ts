@@ -102,6 +102,9 @@ describe('hot scoring', () => {
     expect(computeHot('nodeseek', { comments: 5 }).isHot).toBe(false);
     expect(computeHot('nodeseek', { comments: 5 }).score).toBeGreaterThan(0);
     expect(computeHot('nodeseek', { comments: 10 }).isHot).toBe(true);
+    expect(computeHot('hf-papers', { upvotes: 24, comments: 4 }).isHot).toBe(false);
+    expect(computeHot('hf-papers', { upvotes: 25, comments: 0 }).isHot).toBe(true);
+    expect(computeHot('hf-papers', { upvotes: 1, comments: 5 }).isHot).toBe(true);
   });
 
   it('normalizes scores into a comparable range', () => {

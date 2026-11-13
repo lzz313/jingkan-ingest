@@ -59,10 +59,69 @@ export const SOURCES: Record<SourceId, SourceMeta> = {
     home: 'https://www.reddit.com',
     color: '#ff4500',
   },
+  'hf-papers': {
+    id: 'hf-papers',
+    name: 'Hugging Face Daily Papers',
+    shortName: 'HF Papers',
+    home: 'https://huggingface.co/papers',
+    color: '#ffd21e',
+  },
+  simonw: {
+    id: 'simonw',
+    name: 'Simon Willison',
+    shortName: 'Simon Willison',
+    home: 'https://simonwillison.net',
+    color: '#0f766e',
+  },
+  'google-ai': {
+    id: 'google-ai',
+    name: 'Google AI',
+    shortName: 'Google AI',
+    home: 'https://blog.google/innovation-and-ai/technology/ai/',
+    color: '#4285f4',
+  },
+  producthunt: {
+    id: 'producthunt',
+    name: 'Product Hunt',
+    shortName: 'Product Hunt',
+    home: 'https://www.producthunt.com',
+    color: '#da552f',
+  },
 };
 
 export const SOURCE_ORDER: SourceId[] = [...SOURCE_IDS];
 
+export const TITLE_TRANSLATION_SOURCES: ReadonlySet<SourceId> = new Set([
+  'hn',
+  'reddit',
+  'hf-papers',
+  'simonw',
+  'google-ai',
+  'producthunt',
+]);
+
+export const BRIEF_TRANSLATION_SOURCES: ReadonlySet<SourceId> = new Set([
+  'github',
+  'hf-papers',
+  'simonw',
+  'google-ai',
+  'producthunt',
+]);
+
+export const LATEST_ONLY_SOURCES: ReadonlySet<SourceId> = new Set([
+  'simonw',
+  'google-ai',
+  'producthunt',
+]);
+
 export function isSourceId(value: unknown): value is SourceId {
   return typeof value === 'string' && (SOURCE_IDS as readonly string[]).includes(value);
+}
+
+export function sourceNeedsTitleTranslation(source: SourceId): boolean {
+  return TITLE_TRANSLATION_SOURCES.has(source);
+}
+
+export function sourceNeedsBriefTranslation(source: SourceId): boolean {
+  return BRIEF_TRANSLATION_SOURCES.has(source);
 }

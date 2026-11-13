@@ -34,7 +34,10 @@ function textOf(value: XmlValue): string {
     const record = value as Record<string, XmlValue>;
     if (typeof record['#text'] === 'string') return record['#text'].trim();
     if (typeof record['#text'] === 'number') return String(record['#text']);
+    if (typeof record['@_term'] === 'string') return record['@_term'].trim();
+    if (typeof record['@_label'] === 'string') return record['@_label'].trim();
     if (typeof record['@_href'] === 'string') return record['@_href'].trim();
+    if ('name' in record) return textOf(record.name);
   }
   return '';
 }

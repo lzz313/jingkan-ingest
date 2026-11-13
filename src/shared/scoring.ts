@@ -67,6 +67,13 @@ export function computeHot(source: NormalizedItem['source'], metrics: ItemMetric
       const isHot = rank > 0 && rank <= 10;
       return { isHot, score: rank > 0 ? scaled(26 - rank, 1, 10, 60) : 0 };
     }
+    case 'hf-papers': {
+      const upvotes = finite(metrics.upvotes);
+      const comments = finite(metrics.comments);
+      const isHot = upvotes >= 25 || comments >= 5;
+      const signal = Math.max(upvotes, comments * 5);
+      return { isHot, score: isHot ? scaled(signal, 25, 40, 60) : 0 };
+    }
     default:
       return { isHot: false, score: 0 };
   }

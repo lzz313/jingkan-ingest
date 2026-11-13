@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "cheerio": "1.0.0",
-    "fast-xml-parser": "4.5.3"
+    "fast-xml-parser": "5.12.0"
   },
   "devDependencies": {
     "@types/node": "22.20.5",

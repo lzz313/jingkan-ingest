@@ -56,31 +56,29 @@ export async function backfillTranslations(
     if (pending.length === 0) break;
 
     const titleIds = pending.filter((item) => item.needsTitle).map((item) => item.id);
+    const briefIds = pending.filter((item) => item.needsBrief).map((item) => item.id);
     const bodyIds = pending.filter((item) => item.needsBody).map((item) => item.id);
 
     let roundTranslated = 0;
-    // Each field is independent: a body failure must not block titles.
-    if (titleIds.length > 0) {
+    // Each field is independent: a brief failure must not block titles or HN bodies.
+    for (const [field, ids] of [
+      ['title', titleIds],
+      ['brief', briefIds],
+      ['body', bodyIds],
+    ] as const) {
+      if (ids.length === 0) continue;
       try {
-        const result = await prewarmTranslations(config, titleIds, 'title');
+        const result = await prewarmTranslations(config, ids, field);
         roundTranslated += Object.keys(result.translations).length;
       } catch (error) {
-        log(`title round failed: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-    if (bodyIds.length > 0) {
-      try {
-        const result = await prewarmTranslations(config, bodyIds, 'body');
-        roundTranslated += Object.keys(result.translations).length;
-      } catch (error) {
-        log(`body round failed: ${error instanceof Error ? error.message : String(error)}`);
+        log(`${field} round failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
     rounds++;
     translated += roundTranslated;
     log(
-      `round ${rounds}: ${titleIds.length} title, ${bodyIds.length} body -> ${roundTranslated} translated`,
+      `round ${rounds}: ${titleIds.length} title, ${briefIds.length} brief, ${bodyIds.length} body -> ${roundTranslated} translated`,
     );
 
     if (roundTranslated === 0) {
