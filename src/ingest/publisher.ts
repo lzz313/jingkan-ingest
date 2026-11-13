@@ -119,6 +119,7 @@ export async function runPublisher(config: IngestConfig, options: PublishOptions
       }
     } catch (error) { console.warn('[publish] retention cleanup deferred:', String(error)); }
   } finally {
+    clearInterval(timer);
     await renewal;
     try { await post(config, '/api/admin/publisher', { action: 'release', token }); } catch { /* Expired leases are already fenced. */ }
   }

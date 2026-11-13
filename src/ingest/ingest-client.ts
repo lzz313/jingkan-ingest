@@ -68,4 +68,3 @@ export async function postIngest(
 
   return { upserted, ids: allIds, dataVersion, lastUpdated };
 }
-

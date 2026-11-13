@@ -56,6 +56,11 @@ describe('single fenced R2 publisher', () => {
     expect(paths.some((path) => /sync|export/.test(path))).toBe(false);
     expect(uploads[0]).toMatchObject({ lastUpdated: 100, dataVersion: 2, generatorStateParts: expect.any(Array) });
   });
+  it('stops its renewal timer after releasing the publication lease', async () => {
+    vi.useFakeTimers(); mockServer();
+    await runPublisher(config, { repackOnly: true });
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it('verifies base pack checksums before reading records', async () => {
     const { base, paths } = mockServer({ corrupt: true });
     await expect(readBaseItems(config, base.manifest)).rejects.toThrow('integrity');
