@@ -139,26 +139,28 @@ async function main(): Promise<void> {
   }
 
   const { items, meta } = await collectStableSnapshot(config);
-  const { pack, manifest } = buildSnapshot(items, meta);
+  const { artifacts, manifest } = buildSnapshot(items, meta);
   console.log(
     `[snapshot] built ${manifest.snapshotId}: ${items.length} items, ` +
       `${Object.keys(manifest.responses).length} responses, ` +
-      `${pack.length} bytes`,
+      `${manifest.packSize} bytes in ${artifacts.length} parts`,
   );
 
-  const artifactResponse = await put(
-    config,
-    `/api/admin/snapshot/${encodeURIComponent(manifest.snapshotId)}/artifact`,
-    {
-      body: new Uint8Array(pack),
-      headers: {
-        'content-length': String(pack.length),
-        'content-type': 'application/octet-stream',
-        'x-content-sha256': manifest.packSha256,
+  for (const [part, artifact] of artifacts.entries()) {
+    const response = await put(
+      config,
+      `/api/admin/snapshot/${encodeURIComponent(manifest.snapshotId)}/artifact?part=${part}`,
+      {
+        body: new Uint8Array(artifact.body),
+        headers: {
+          'content-length': String(artifact.body.length),
+          'content-type': 'application/octet-stream',
+          'x-content-sha256': artifact.sha256,
+        },
       },
-    },
-  );
-  await artifactResponse.arrayBuffer();
+    );
+    await response.arrayBuffer();
+  }
 
   const manifestResponse = await put(
     config,

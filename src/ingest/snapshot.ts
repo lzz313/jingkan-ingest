@@ -16,7 +16,9 @@ const HOT_PER_SOURCE = 5;
 const RISING_PER_SOURCE = 8;
 const HOT_FRESH_MS = DAY_MS;
 const RISING_WINDOW_MS = DAY_MS;
-const SNAPSHOT_FORMAT_VERSION = 1;
+const SNAPSHOT_FORMAT_VERSION = 2;
+export const SNAPSHOT_PACK_TARGET_BYTES = 8 * 1024 * 1024;
+const CANONICAL_CHUNK_BYTES = 256 * 1024;
 
 export interface SnapshotMeta {
   lastUpdated: number;
@@ -26,6 +28,7 @@ export interface SnapshotMeta {
 }
 
 export interface SnapshotRange {
+  key?: string;
   offset: number;
   length: number;
 }
@@ -39,10 +42,12 @@ export interface SnapshotManifest extends SnapshotMeta {
   packSha256: string;
   canonical: SnapshotRange;
   responses: Record<string, SnapshotRange>;
+  artifacts: Array<{ key: string; size: number; sha256: string }>;
+  canonicalParts: SnapshotRange[];
 }
 
 export interface SnapshotBuild {
-  pack: Buffer;
+  artifacts: Array<{ key: string; body: Buffer; sha256: string }>;
   manifest: SnapshotManifest;
 }
 
@@ -229,17 +234,29 @@ export function buildSnapshot(
   rawItems: FeedItem[],
   meta: SnapshotMeta,
   generatedAt = Date.now(),
+  targetBytes = SNAPSHOT_PACK_TARGET_BYTES,
 ): SnapshotBuild {
   const items = rawItems
     .filter((item) => !item.hidden)
     .sort(compareLatest);
   const snapshotId = `${meta.dataVersion}-${generatedAt}`;
-  const chunks: Buffer[] = [];
-  const responses: Record<string, SnapshotRange> = {};
+  const artifacts: SnapshotBuild['artifacts'] = [];
+  let chunks: Buffer[] = [];
   let packOffset = 0;
+  const responses: Record<string, SnapshotRange> = {};
+  const partKey = () => `feed/v1/artifacts/${snapshotId}/${artifacts.length}.pack`;
+  const flush = () => {
+    if (chunks.length === 0) return;
+    const body = Buffer.concat(chunks);
+    artifacts.push({ key: partKey(), body, sha256: createHash('sha256').update(body).digest('hex') });
+    chunks = [];
+    packOffset = 0;
+  };
   const appendJson = (value: unknown): SnapshotRange => {
     const bytes = Buffer.from(JSON.stringify(value));
-    const range = { offset: packOffset, length: bytes.length };
+    if (bytes.length > 64 * 1024 * 1024) throw new Error('Snapshot record exceeds upload limit');
+    if (packOffset > 0 && packOffset + bytes.length > targetBytes) flush();
+    const range = { key: partKey(), offset: packOffset, length: bytes.length };
     chunks.push(bytes);
     packOffset += bytes.length;
     return range;
@@ -270,25 +287,35 @@ export function buildSnapshot(
     }
   }
 
-  const canonical = appendJson({
-    formatVersion: SNAPSHOT_FORMAT_VERSION,
-    snapshotId,
-    generatedAt,
-    ...meta,
-    items,
-  });
-  const pack = Buffer.concat(chunks);
+  const canonicalParts: SnapshotRange[] = [];
+  let group: FeedItem[] = [];
+  let groupBytes = 2;
+  for (const item of items) {
+    const size = Buffer.byteLength(JSON.stringify(item)) + 1;
+    if (group.length > 0 && groupBytes + size > CANONICAL_CHUNK_BYTES) {
+      canonicalParts.push(appendJson(group));
+      group = [];
+      groupBytes = 2;
+    }
+    group.push(item);
+    groupBytes += size;
+  }
+  canonicalParts.push(appendJson(group));
+  flush();
+  const first = artifacts[0]!;
   return {
-    pack,
+    artifacts,
     manifest: {
       formatVersion: SNAPSHOT_FORMAT_VERSION,
       snapshotId,
       generatedAt,
-      packKey: `feed/v1/artifacts/${snapshotId}.pack`,
-      packSize: pack.length,
-      packSha256: createHash('sha256').update(pack).digest('hex'),
+      packKey: first.key,
+      packSize: artifacts.reduce((sum, artifact) => sum + artifact.body.length, 0),
+      packSha256: first.sha256,
       ...meta,
-      canonical,
+      artifacts: artifacts.map(({ key, body, sha256 }) => ({ key, size: body.length, sha256 })),
+      canonical: canonicalParts[0]!,
+      canonicalParts,
       responses,
     },
   };

@@ -112,7 +112,8 @@ describe('snapshot feed builder', () => {
 
 describe('snapshot artifact', () => {
   it('packs canonical output and common responses into byte ranges', () => {
-    const { pack, manifest } = buildSnapshot(items, meta, NOW);
+    const { artifacts, manifest } = buildSnapshot(items, meta, NOW);
+    const pack = artifacts[0]!.body;
     expect(manifest.packSize).toBe(pack.length);
     expect(manifest.packSha256).toMatch(/^[0-9a-f]{64}$/);
 
@@ -126,14 +127,20 @@ describe('snapshot artifact', () => {
     expect(response.dataVersion).toBe(7);
 
     const canonical = JSON.parse(
-      pack
-        .subarray(
-          manifest.canonical.offset,
-          manifest.canonical.offset + manifest.canonical.length,
-        )
-        .toString('utf8'),
-    ) as { snapshotId: string; items: FeedItem[] };
-    expect(canonical.snapshotId).toBe(manifest.snapshotId);
-    expect(canonical.items).toHaveLength(5);
+      pack.subarray(manifest.canonical.offset, manifest.canonical.offset + manifest.canonical.length).toString('utf8'),
+    ) as FeedItem[];
+    expect(manifest.formatVersion).toBe(2);
+    expect(canonical).toHaveLength(5);
   });
+  it('splits packages without splitting a JSON response across artifacts', () => {
+    const { artifacts, manifest } = buildSnapshot(items, meta, NOW, 4096);
+    expect(artifacts.length).toBeGreaterThan(1);
+    expect(manifest.packSize).toBe(artifacts.reduce((sum, part) => sum + part.body.length, 0));
+    for (const range of [...Object.values(manifest.responses), ...manifest.canonicalParts]) {
+      const part = artifacts.find((entry) => entry.key === range.key)!;
+      expect(range.offset + range.length).toBeLessThanOrEqual(part.body.length);
+      expect(() => JSON.parse(part.body.subarray(range.offset, range.offset + range.length).toString())).not.toThrow();
+    }
+  });
+
 });
