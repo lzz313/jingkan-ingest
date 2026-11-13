@@ -1,6 +1,8 @@
 /** English prose needs Chinese text; names and code are retained within the translation. */
 export function needsChineseTranslation(text: string | null | undefined): boolean {
-  const prose = (text ?? '').replace(/https?:\/\/\S+|`[^`]*`/g, ' ');
+  const prose = (text ?? '').replace(/https?:\/\/\S+|`[^`]*`/g, ' ')
+    .replace(/\s+[·|]\s+(?:Hugging Face|GitHub)\s*$/i, '')
+    .replace(/\b[a-z0-9]+(?:[./_-][a-z0-9]+)+\b/gi, ' ');
   const latin = prose.match(/[a-z]/gi)?.length ?? 0;
   const chinese = prose.match(/\p{Script=Han}/gu)?.length ?? 0;
   return (prose.match(/[a-z]{2,}/gi)?.length ?? 0) >= 2 && latin > chinese * 3;
