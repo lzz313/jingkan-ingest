@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildSnapshot } from '../src/ingest/snapshot';
 import { readBaseItems } from '../src/ingest/snapshot-client';
-import { runPublisher } from '../src/ingest/publisher';
+import { runPublisher, selectBacklog } from '../src/ingest/publisher';
 import { fetchSources } from '../src/ingest/sources';
 import type { FeedItem } from '../src/shared/types';
 vi.mock('../src/ingest/sources', () => ({ fetchSources: vi.fn(async () => ({ items: [], sourceStatus: {} })) }));
@@ -14,7 +14,7 @@ const post = (id: string): FeedItem => ({
 });
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
-beforeEach(() => vi.mocked(fetchSources).mockResolvedValue({ items: [], sourceStatus: {} }));
+beforeEach(() => { vi.mocked(fetchSources).mockReset().mockResolvedValue({ items: [], sourceStatus: {} }); });
 function mockServer(options: { uploadFails?: boolean; conflict?: boolean; renewFails?: boolean; events?: boolean; corrupt?: boolean } = {}) {
   const meta = { dataVersion: 1, lastUpdated: 100, lastRefreshAt: 0, sources: {} };
   const base = buildSnapshot([post('hn:1')], meta);
@@ -49,6 +49,11 @@ function mockServer(options: { uploadFails?: boolean; conflict?: boolean; renewF
   }));
   return { paths, uploads, base };
 }
+it('rotates translation sources and alternates fresh items with older backlog', () => {
+  const items = [post('hn:new'), post('hn:middle'), post('hn:old'), { ...post('reddit:new'), source: 'reddit' as const }, { ...post('reddit:old'), source: 'reddit' as const }];
+  expect(selectBacklog(items, 4).map((item) => item.id)).toEqual(['hn:new', 'reddit:new', 'hn:old', 'reddit:old']);
+  expect(items).toHaveLength(5);
+});
 describe('single fenced R2 publisher', () => {
   it('bootstraps from R2, preserves source timestamps and writes private generator state', async () => {
     const { paths, uploads } = mockServer(); await runPublisher(config, { repackOnly: true });

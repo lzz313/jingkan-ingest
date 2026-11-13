@@ -25,12 +25,30 @@ async function pendingEvents(config: IngestConfig): Promise<Array<{ key: string;
   }
   return events.sort((a, b) => a.event.createdAt - b.event.createdAt || a.key.localeCompare(b.key));
 }
+/** Rotate sources and alternate newest/oldest so fresh traffic cannot starve backlog. */
+export function selectBacklog(items: FeedItem[], limit: number): FeedItem[] {
+  const groups = new Map<string, FeedItem[]>();
+  for (const item of items) {
+    const group = groups.get(item.source) ?? []; group.push(item); groups.set(item.source, group);
+  }
+  const selected: FeedItem[] = [];
+  for (let round = 0; selected.length < limit; round++) {
+    let progress = false;
+    for (const group of groups.values()) {
+      const item = round % 2 === 0 ? group.shift() : group.pop();
+      if (item) { selected.push(item); progress = true; }
+      if (selected.length === limit) break;
+    }
+    if (!progress) break;
+  }
+  return selected;
+}
 async function enrich(config: IngestConfig, state: GeneratorState): Promise<void> {
   const records = [...state.records.values()].filter((record) => !record.ruleHidden).sort((a, b) => b.item.publishedAt - a.item.publishedAt);
-  const pending = records.filter((record) => record.moderation === 'pending').slice(0, 60);
+  const pending = selectBacklog(records.filter((record) => record.moderation === 'pending').map((r) => r.item), 60);
   for (let offset = 0; offset < pending.length; offset += 20) {
     try {
-      const result = await post<{ moderation: Array<{ id: string; contentHash: string | null; hide: boolean; reason: string | null }> }>(config, '/api/admin/enrich', { kind: 'moderate', items: pending.slice(offset, offset + 20).map((r) => r.item) });
+      const result = await post<{ moderation: Array<{ id: string; contentHash: string | null; hide: boolean; reason: string | null }> }>(config, '/api/admin/enrich', { kind: 'moderate', items: pending.slice(offset, offset + 20) });
       for (const decision of result.moderation) {
         const record = state.records.get(decision.id);
         if (record?.item.contentHash !== decision.contentHash || typeof decision.hide !== 'boolean') continue;
@@ -42,9 +60,9 @@ async function enrich(config: IngestConfig, state: GeneratorState): Promise<void
   if (!config.prewarmTranslations) return;
   const visible = records.filter((record) => record.moderation === 'keep').map((r) => r.item);
   const tasks: Array<{ field: TranslateField; items: FeedItem[] }> = [
-    { field: 'title', items: visible.filter((item) => sourceNeedsTitleTranslation(item.source) && !item.titleZh).slice(0, 30) },
-    { field: 'brief', items: visible.filter((item) => ['github', 'hf-papers', 'simonw', 'google-ai', 'producthunt'].includes(item.source) && !item.briefZh && Boolean(item.brief || item.body)).slice(0, 30) },
-    { field: 'body', items: visible.filter((item) => item.source === 'hn' && !item.bodyZh && Boolean(item.body)).slice(0, 20) },
+    { field: 'title', items: selectBacklog(visible.filter((item) => sourceNeedsTitleTranslation(item.source) && !item.titleZh), 30) },
+    { field: 'brief', items: selectBacklog(visible.filter((item) => ['github', 'hf-papers', 'simonw', 'google-ai', 'producthunt'].includes(item.source) && !item.briefZh && Boolean(item.brief || item.body)), 30) },
+    { field: 'body', items: selectBacklog(visible.filter((item) => item.source === 'hn' && !item.bodyZh && Boolean(item.body)), 20) },
   ];
   for (const task of tasks) {
     for (let offset = 0; offset < task.items.length; offset += 10) {
