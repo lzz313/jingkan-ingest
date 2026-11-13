@@ -103,6 +103,15 @@ describe('LINUX DO adapter', () => {
     expect(items[0]!.body).not.toContain('阅读完整话题');
   });
 
+  it('keeps a single original when the RSS contains its thumbnail and srcset sizes', async () => {
+    const hash = 'e501efabb23b73adbfd8e2eca3ff2f4532c1ac82';
+    const original = `https://cdn3.ldstatic.com/original/4X/e/5/0/${hash}.jpeg`;
+    const small = original.replace('/original/', '/optimized/').replace('.jpeg', '_2_287x500.jpeg');
+    const large = original.replace('/original/', '/optimized/').replace('.jpeg', '_2_574x1000.jpeg');
+    vi.stubGlobal('fetch', async () => new Response(`<rss version="2.0"><channel><item><title>图片测试</title><link>https://linux.do/t/topic/42</link><description><![CDATA[<a href="${original}"><img src="${small}" srcset="${small} 1x, ${large} 2x"></a>]]></description><pubDate>Wed, 11 Nov 2026 11:55:00 +0000</pubDate></item></channel></rss>`));
+    expect((await fetchLinuxDo())[0]!.images).toEqual([original]);
+  });
+
   it('reads English post labels from the Reader XML fallback', async () => {
     vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
       const url =

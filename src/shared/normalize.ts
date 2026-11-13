@@ -1,3 +1,4 @@
+import { deduplicateImages } from './images';
 import type { ItemExtra, ItemMetrics, NormalizedItem, SourceId } from './types';
 import { isSourceId } from './sources';
 import { extractImages, firstSentences, hashText, stripHtml } from './html';
@@ -26,9 +27,7 @@ export function normalizeItem(raw: NormalizedItem, now = Date.now()): Normalized
 
   const body = stripHtml(raw.body ?? '').slice(0, MAX_BODY);
   const brief = (raw.brief || firstSentences(body, 180)).trim().slice(0, MAX_BRIEF);
-  const images = Array.from(
-    new Set([...(raw.images ?? []), ...extractImages(raw.body, url)]),
-  ).slice(0, 8);
+  const images = deduplicateImages([...(raw.images ?? []), ...extractImages(raw.body, url)], url);
 
   const metrics: ItemMetrics = {};
   for (const [key, value] of Object.entries(raw.metrics ?? {})) {

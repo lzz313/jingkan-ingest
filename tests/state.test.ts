@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyEvent, bootstrapRecords, reconcileState, mergeItems, pruneState, removedItems, updateSources, visibleItems, isSourceWindow, type GeneratorState } from '../src/ingest/state';
+import { applyEvent, bootstrapRecords, reconcileState, deduplicateStateImages, mergeItems, pruneState, removedItems, updateSources, visibleItems, isSourceWindow, type GeneratorState } from '../src/ingest/state';
 import type { NormalizedItem, FeedItem } from '../src/shared/types';
 const now = Date.UTC(2026, 10, 13, 2);
 function state(): GeneratorState { return { records: new Map(), sources: {}, lastUpdated: 0, lastRefreshAt: 0, lastIngestAttemptAt: 0 }; }
@@ -123,4 +123,17 @@ describe('policy repair of retained data', () => {
     mergeItems(s, [post({ source: 'x' })], now + 3600000);
     expect(s.records.get('x:1')!.item.titleZh).toBe('编译器研究');
   });
+});
+
+it('repairs retained image variants without changing timestamps or content hashes', () => {
+  const s = state(); mergeItems(s, [post({ source: 'linuxdo' })], now);
+  const record = s.records.get('linuxdo:1')!;
+  const hash = 'e501efabb23b73adbfd8e2eca3ff2f4532c1ac82';
+  const original = `https://cdn3.ldstatic.com/original/4X/e/5/0/${hash}.jpeg`;
+  record.item.images = [original.replace('/original/', '/optimized/').replace('.jpeg', '_2_287x500.jpeg'), original];
+  const before = { fetchedAt: record.item.fetchedAt, contentHash: record.item.contentHash, observedAt: record.observedAt, lastUpdated: s.lastUpdated };
+  expect(deduplicateStateImages(s)).toBe(1);
+  expect(record.item.images).toEqual([original]);
+  expect({ fetchedAt: record.item.fetchedAt, contentHash: record.item.contentHash, observedAt: record.observedAt, lastUpdated: s.lastUpdated }).toEqual(before);
+  expect(deduplicateStateImages(s)).toBe(0);
 });

@@ -5,7 +5,7 @@ import type { IngestConfig } from './env';
 import { call, post, readBase, readBaseItems, readBaseRecords, uploadSnapshot } from './snapshot-client';
 import { buildSnapshot } from './snapshot';
 import { fetchSources } from './sources';
-import { applyEvent, bootstrapRecords, isSourceWindow, mergeItems, reconcileState, pruneState, removedItems, updateSources, visibleItems,
+import { applyEvent, bootstrapRecords, isSourceWindow, mergeItems, deduplicateStateImages, reconcileState, pruneState, removedItems, updateSources, visibleItems,
   type EnrichmentEntry, type GeneratorState, type InputEvent, type StoredItem } from './state';
 
 interface LeaseState { lease: { token: string; expiresAt: number }; lastRefreshAt: number }
@@ -104,6 +104,8 @@ export async function runPublisher(config: IngestConfig, options: PublishOptions
       const fetched = await fetchSources(now);
       mergeItems(state, fetched.items, now); updateSources(state, fetched.sourceStatus, now);
     }
+    const imageRepairs = deduplicateStateImages(state);
+    if (imageRepairs) console.log(`[publish] deduplicated images in ${imageRepairs} records`);
     if (!options.repackOnly) {
       pruneState(state, now - 35 * 86400000);
       console.log('[publish] policy reconciliation:', JSON.stringify(reconcileState(state)));

@@ -1,3 +1,4 @@
+import { deduplicateImages } from '../shared/images';
 import { isUsableTranslation, translationText } from '../shared/translation';
 import type { FeedItem, NormalizedItem, SourceId, SourceStatus, IngestStatus } from '../shared/types';
 import { normalizeItem } from '../shared/normalize';
@@ -96,7 +97,7 @@ export function applyEvent(state: GeneratorState, event: InputEvent): void {
       const record = state.records.get(patch.id);
       if (!record || event.createdAt < record.observedAt) continue;
       if (typeof patch.hidden === 'boolean') { record.ruleHidden = patch.hidden; record.item.hidden = patch.hidden; }
-      if (Array.isArray(patch.images)) record.item.images = patch.images.filter((url) => /^https?:\/\//.test(url)).slice(0, 8);
+      if (Array.isArray(patch.images)) record.item.images = deduplicateImages(patch.images, record.item.url);
     }
   }
 }
@@ -108,6 +109,18 @@ export function updateSources(state: GeneratorState, status: Partial<Record<Sour
   }
   if (Object.values(status).some((entry) => entry?.ok && (entry.count ?? 0) > 0)) state.lastUpdated = Math.max(state.lastUpdated, now);
 }
+/** Repair retained image lists without changing source freshness or content hashes. */
+export function deduplicateStateImages(state: GeneratorState): number {
+  let changed = 0;
+  for (const record of state.records.values()) {
+    const images = deduplicateImages(record.item.images, record.item.url);
+    if (JSON.stringify(images) !== JSON.stringify(record.item.images)) {
+      record.item.images = images; changed++;
+    }
+  }
+  return changed;
+}
+
 /** Apply current policy to retained records too, including posts no longer returned by a source. */
 export function reconcileState(state: GeneratorState): { hidden: number; translationsReset: number } {
   let hidden = 0, translationsReset = 0;

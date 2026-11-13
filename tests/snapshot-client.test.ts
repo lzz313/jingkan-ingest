@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildSnapshot } from '../src/ingest/snapshot';
+import { buildSnapshot, type SnapshotManifest } from '../src/ingest/snapshot';
 import { readBaseItems } from '../src/ingest/snapshot-client';
 import { runPublisher, selectBacklog } from '../src/ingest/publisher';
 import { fetchSources } from '../src/ingest/sources';
@@ -15,9 +15,13 @@ const post = (id: string): FeedItem => ({
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 beforeEach(() => { vi.mocked(fetchSources).mockReset().mockResolvedValue({ items: [], sourceStatus: {} }); });
-function mockServer(options: { uploadFails?: boolean; conflict?: boolean; renewFails?: boolean; events?: boolean; corrupt?: boolean } = {}) {
+function mockServer(options: { uploadFails?: boolean; conflict?: boolean; renewFails?: boolean; events?: boolean; corrupt?: boolean; imageVariants?: boolean } = {}) {
   const meta = { dataVersion: 1, lastUpdated: 100, lastRefreshAt: 0, sources: {} };
-  const base = buildSnapshot([post('hn:1')], meta);
+  const baseItem = post('hn:1');
+  const originalImage = 'https://cdn3.ldstatic.com/original/4X/e/5/0/e501efabb23b73adbfd8e2eca3ff2f4532c1ac82.jpeg';
+  if (options.imageVariants) baseItem.images = [originalImage.replace('/original/', '/optimized/').replace('.jpeg', '_2_287x500.jpeg'), originalImage];
+  const base = buildSnapshot([baseItem], meta);
+  const uploadedParts = new Map<number, Buffer>();
   const paths: string[] = [], uploads: unknown[] = [];
   vi.stubGlobal('fetch', vi.fn(async (request: string | URL, init?: RequestInit) => {
     const url = new URL(request), method = init?.method ?? 'GET';
@@ -37,6 +41,7 @@ function mockServer(options: { uploadFails?: boolean; conflict?: boolean; renewF
     if (url.pathname.endsWith('/ack')) return json({ ok: true });
     if (method === 'PUT') {
       if (url.pathname.endsWith('/manifest')) uploads.push(body);
+      if (url.pathname.endsWith('/artifact')) uploadedParts.set(Number(url.searchParams.get('part')), Buffer.from(init!.body as Uint8Array));
       return options.uploadFails ? json({ error: 'upload failed' }, 503) : json({ ok: true });
     }
     if (url.pathname.endsWith('/activate')) {
@@ -47,7 +52,7 @@ function mockServer(options: { uploadFails?: boolean; conflict?: boolean; renewF
     if (url.pathname.endsWith('/enrich')) return json({ error: 'AI unavailable' }, 503);
     throw new Error('Unexpected request: ' + url.pathname);
   }));
-  return { paths, uploads, base };
+  return { paths, uploads, base, uploadedParts, originalImage };
 }
 it('rotates translation sources and alternates fresh items with older backlog', () => {
   const items = [post('hn:new'), post('hn:middle'), post('hn:old'), { ...post('reddit:new'), source: 'reddit' as const }, { ...post('reddit:old'), source: 'reddit' as const }];
@@ -60,6 +65,18 @@ describe('single fenced R2 publisher', () => {
     expect(fetchSources).not.toHaveBeenCalled();
     expect(paths.some((path) => /sync|export/.test(path))).toBe(false);
     expect(uploads[0]).toMatchObject({ lastUpdated: 100, dataVersion: 2, generatorStateParts: expect.any(Array) });
+  });
+  it('repairs both public and private image lists during repacking', async () => {
+    const { uploads, uploadedParts, originalImage } = mockServer({ imageVariants: true });
+    await runPublisher(config, { repackOnly: true });
+    const manifest = uploads[0] as SnapshotManifest;
+    const read = (ranges: SnapshotManifest['canonicalParts']) => ranges.flatMap((range) => {
+      const part = manifest.artifacts.findIndex((artifact) => artifact.key === range.key);
+      return JSON.parse(uploadedParts.get(part)!.subarray(range.offset, range.offset + range.length).toString());
+    });
+    expect(read(manifest.canonicalParts)[0].images).toEqual([originalImage]);
+    expect(read(manifest.generatorStateParts!)[0].item.images).toEqual([originalImage]);
+    expect(manifest.lastUpdated).toBe(100);
   });
   it('stops its renewal timer after releasing the publication lease', async () => {
     vi.useFakeTimers(); mockServer();

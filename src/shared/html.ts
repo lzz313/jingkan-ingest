@@ -1,39 +1,22 @@
-const NAMED_ENTITIES: Record<string, string> = {
-  amp: '&',
-  lt: '<',
-  gt: '>',
-  quot: '"',
-  apos: "'",
-  nbsp: ' ',
-  hellip: '…',
-  mdash: '—',
-  ndash: '–',
-  lsquo: '‘',
-  rsquo: '’',
-  ldquo: '“',
-  rdquo: '”',
-  middot: '·',
-  copy: '©',
-  reg: '®',
-  trade: '™',
-  times: '×',
-};
+import { deduplicateImages } from './images';
+import { decodeEntities } from './entities';
+export { decodeEntities } from './entities';
 
-export function decodeEntities(text: string): string {
-  return text.replace(/&(#x?[0-9a-f]+|[a-z][a-z0-9]+);/gi, (whole, entity: string) => {
-    if (entity.startsWith('#')) {
-      const hex = entity[1]?.toLowerCase() === 'x';
-      const code = Number.parseInt(entity.slice(hex ? 2 : 1), hex ? 16 : 10);
-      if (Number.isFinite(code) && code > 0 && code <= 0x10ffff) {
-        try {
-          return String.fromCodePoint(code);
-        } catch {
-          return whole;
-        }
-      }
-      return whole;
+/** Escape text for HTML text nodes and quoted attribute values. */
+export function escapeHtml(value: string | null | undefined): string {
+  return (value ?? '').replace(/[&<>"']/g, (ch) => {
+    switch (ch) {
+      case '&':
+        return '&amp;';
+      case '<':
+        return '&lt;';
+      case '>':
+        return '&gt;';
+      case '"':
+        return '&quot;';
+      default:
+        return '&#39;';
     }
-    return NAMED_ENTITIES[entity.toLowerCase()] ?? whole;
   });
 }
 
@@ -54,6 +37,31 @@ export function stripHtml(html: string | null | undefined): string {
     .trim();
 
   return decodeEntities(text);
+}
+
+/**
+ * Strip Markdown constructs that would leak into plain-text summaries (SSR
+ * cards, meta descriptions). Full Markdown is rendered by the client; this is
+ * deliberately conservative so prose like `3 * 4 * 5` and `snake_case` stays
+ * untouched.
+ */
+export function stripMarkdown(markdown: string | null | undefined): string {
+  if (!markdown) return '';
+  return markdown
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/~~~[\s\S]*?~~~/g, ' ')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/!\[([^\]]*)\]\([^)\s]*(?:\s+"[^"]*")?\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)\s]*(?:\s+"[^"]*")?\)/g, '$1')
+    .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, '')
+    .replace(/^[ \t]{0,3}>[ \t]?/gm, '')
+    .replace(/^[ \t]*(?:[-*+]|\d+[.)])[ \t]+/gm, '')
+    .replace(/\*\*([^\s*][^*\n]*?)\*\*/g, '$1')
+    .replace(/(?<!\*)\*([^\s*][^*\n]*?)\*(?!\*)/g, '$1')
+    .replace(/~~([^\s~][^~\n]*?)~~/g, '$1')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 const IMAGE_EXTENSION = /\.(?:png|jpe?g|gif|webp|avif|bmp)(?:[?#].*)?$/i;
@@ -85,35 +93,32 @@ export function extractImages(html: string | null | undefined, baseUrl?: string,
 
   for (const match of html.matchAll(/<img\b[^>]*>/gi)) {
     const tag = match[0];
-    const srcset = tag.match(/\b(?:srcset|data-srcset)=["']([^"']+)["']/i)?.[1];
-    if (srcset) {
-      const first = srcset.split(',')[0]?.trim().split(/\s+/)[0];
-      addCandidate(out, first, baseUrl);
+    // One img element represents one picture; srcset lists alternate sizes.
+    let candidate: string | undefined;
+    for (const attr of ['data-original', 'data-src', 'data-lazy-src', 'src']) {
+      const value = tag.match(new RegExp(`(?:^|\\s)${attr}=["']([^"']+)["']`, 'i'))?.[1];
+      if (value) { candidate = value; break; }
     }
-    for (const attr of ['src', 'data-src', 'data-original', 'data-lazy-src']) {
-      const value = tag.match(new RegExp(`\\b${attr}=["']([^"']+)["']`, 'i'))?.[1];
-      if (value) {
-        addCandidate(out, value, baseUrl);
-        break;
-      }
+    if (!candidate) {
+      const srcset = tag.match(/(?:^|\s)(?:srcset|data-srcset)=["']([^"']+)["']/i)?.[1];
+      candidate = srcset?.split(',').at(-1)?.trim().split(/\s+/)[0];
     }
-    if (out.length >= limit) return out;
+    addCandidate(out, candidate, baseUrl);
   }
 
   for (const match of html.matchAll(/!\[[^\]]*\]\(\s*([^)\s]+)(?:\s+["'][^"']*["'])?\s*\)/g)) {
     addCandidate(out, match[1], baseUrl);
-    if (out.length >= limit) return out;
   }
 
-  for (const match of html.matchAll(/https?:\/\/[^\s"'<>()]+/gi)) {
+  const withoutImageTags = html.replace(/<img\b[^>]*>/gi, ' ');
+  for (const match of withoutImageTags.matchAll(/https?:\/\/[^\s"'<>()]+/gi)) {
     const url = match[0].replace(/[),.;]+$/, '');
     if (IMAGE_EXTENSION.test(url)) {
       addCandidate(out, url, baseUrl);
-      if (out.length >= limit) return out;
     }
   }
 
-  return out;
+  return deduplicateImages(out, baseUrl, limit);
 }
 
 export function firstSentences(text: string | null | undefined, maxLength = 180): string {
