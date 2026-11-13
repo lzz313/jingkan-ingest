@@ -1,8 +1,6 @@
 # 静看抓取任务
 
-静看（JingKan）的定时抓取仓库。它只负责从各个来源拉取内容，并通过 Worker 的 `/api/ingest` 接口写入 D1；Worker、Web 界面和数据库配置在私有仓库中。
-
-它同时每 5 分钟把 D1 中最近 35 天的公开内容导出为 R2 快照，并在完整校验后原子切换线上读取版本。
+静看（JingKan）的统一抓取与发布仓库。每 5 分钟读取 R2 生成状态及待处理输入，按时段抓取来源，完成过滤、审核、翻译、热度计算并发布不可变快照。Worker、Web 界面及存储配置在私有仓库中，运行时不依赖 D1。
 
 ## 抓取来源
 
@@ -39,7 +37,7 @@ X 在页面上仍是一个频道，内部由两个公开入口互补：`X 榜单
 
 其余时间不抓取。GitHub Actions 的 schedule 是尽力而为，实际执行可能晚几分钟。
 
-`Snapshot` workflow 每个整 5 分钟运行一次，也会在每轮 `Ingest` 完成后触发。它使用同一个 `INGEST_TOKEN`，先生成并上传快照，再切换当前指针；上传或校验失败时线上继续使用上一有效版本。
+`Ingest` 每 5 分钟检查事件、翻译/审核积压与排名，来源在上述时段且距上次尝试至少 10 分钟时抓取。手动运行默认强制抓取。`Snapshot` 只手动重打包，不自动运行；两个 workflow 共用 `jingkan-publisher` concurrency。上传或校验失败时线上继续使用旧版本。
 
 ## 配置
 
@@ -49,7 +47,6 @@ X 在页面上仍是一个频道，内部由两个公开入口互补：`X 榜单
 | --- | --- | --- |
 | `INGEST_TOKEN` | Secret | 与 Worker 的 `INGEST_TOKEN` secret 相同 |
 | `PREWARM_TRANSLATIONS` | Variable | 可选，设为 `0` 可关闭翻译预热与回填（HN 标题/正文、Reddit 标题、GitHub 简介、AI 来源标题/摘要；Product Hunt 保留产品名并翻译简介） |
-| `AI_MODERATION` | Variable | 可选，设为 `0` 可关闭社区内容 AI 审核（V2EX / NodeSeek / LINUX DO） |
 
 Worker 地址直接写在 `.github/workflows/ingest.yml` 里（目前是 `https://jing.show`）；换自定义域名时同步修改即可。
 
@@ -67,27 +64,29 @@ JINGKAN_BASE_URL=http://127.0.0.1:8787 INGEST_TOKEN=<local-dev-token> npm run mo
 JINGKAN_BASE_URL=http://127.0.0.1:8787 INGEST_TOKEN=<local-dev-token> npm run snapshot
 ```
 
-`npm run backfill` 会补抓取轮次没翻完的 HN 标题和正文：最多 12 轮、每轮 20 条、8 分钟墙钟上限；workflow 在每次 ingest 之后自动执行，`continue-on-error`，失败不影响抓取结果。
+`npm run ingest` 运行统一发布器；`FORCE_FETCH=1` 强制立即抓取。`backfill` 和 `moderate` 保留为统一发布器的兼容命令，均获取同一发布租约，不再调用旧 SQL 管理接口。
 
-`npm run moderate` 在回填之后调用 Worker 的 `/api/admin/moderate`，分批审核 V2EX / NodeSeek / LINUX DO 的新条目：垃圾广告/引流和低质量水帖直接隐藏。最多 6 轮、每轮 60 条、3 分钟墙钟上限；连续两轮没有进展（例如 Workers AI 不可用）就停止。两次调用间隔里如果有新条目，会在下一轮 workflow 继续。
+每轮最多审核 60 个 pending 社区记录，审核服务失败保持 pending；翻译约 30 个标题、30 个简介和 20 个 HN 正文，失败不阻塞其他内容发布。社区审核不能通过环境开关绕过；旧 `AI_MODERATION` variable 不再使用。品牌/产品标题保留原文。
 
-`npm run snapshot` 导出全部来源、构建热门/上升榜和各日期筛选的预序列化响应，再上传约 29 MB 的当前数据包。构建完全在 GitHub runner 上完成，不占用 Cloudflare 免费 Worker 的 10ms CPU 配额。
+`npm run snapshot` 只重打包已有 R2 数据，保留来源更新时间，跳过新输入、抓取及 AI。构建在 GitHub runner 上完成。
 
 ## 维护提示
 
 - 公开发布仓库的定时 workflow 在 60 天没有仓库活动后可能被 GitHub 自动禁用；仓库已内置 `Keepalive` workflow，每月 1 日自动提交一次来重置计时。
 - 建议开启分支保护，并要求外部贡献者的 Actions 运行需人工批准。
 
-## R2 增量快照
+## R2 状态与发布
 
-`Snapshot` 每 5 分钟及 Ingest 结束后运行。首次导出 35 天窗口，之后按条目修订号读取变化与隐藏记录，未变化的数据从 R2 复用；排名和日期窗口仍会重算。Worker 为导出设置每日 200 万读取行预算，触及预算或 D1 额度后自动退避到下一个 UTC 零点，现有快照持续提供服务。
+首次从当前 R2 公开快照启动，保留既有可见内容；以后从 `generatorStateParts` 恢复完整状态，包括被隐藏/待审核条目、verdict/hash 与观察时间。文章保留 35 天，X 的两个提供方、HN 旧链接和原发表时间规则保持不变；互动指标每小时更新，热度跨门槛和内容修改立即更新。
 
-v2 快照按目标 8 MiB 拆包，最多 32 个包；manifest 包含大小、SHA-256、响应范围、分片 ID 索引和轻量排名目录。全部上传校验成功后才切换当前指针；v1 读取仍兼容。
+公开 canonical、ID 索引、目录和预序列化响应只含通过规则与审核的内容。私有生成状态与公开数据在同一不可变包中，但只能通过鉴权管理接口下载。v2 按目标 8 MiB 拆包、最多 32 包，读取基础包和上传时均校验 SHA-256；兼容 v1。
 
-仅转换现有 R2 快照格式、跳过 D1 时，可手动运行：
+控制 DO 保存 180 秒发布租约、每 60 秒续租。激活必须同时持有有效租约、匹配前一版本，并通过 R2 条件写；失去锁或版本冲突立即停止激活。只有发布成功后才确认输入日志；崩溃重试可幂等回放，超 35 天的事件与 enrichment 缓存分批清理。全来源失败/仅重算排名不会伪造内容更新时间。
+
+仅重打包现有数据：
 
 ```bash
-gh workflow run snapshot.yml --repo lzz313/jingkan-ingest -f repack_from_r2=true
+gh workflow run snapshot.yml --repo lzz313/jingkan-ingest
 ```
 
-此操作保留原内容更新时间和增量水位，不代表重新抓取了来源数据。正常定时运行会恢复 D1 增量同步。
+发布器要求已有合法 R2 基础快照；空 bucket 需先导入基础快照，损坏或缺失时停止以保护线上内容。

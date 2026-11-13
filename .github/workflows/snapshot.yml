@@ -1,52 +1,26 @@
 name: Snapshot
-
 on:
-  schedule:
-    - cron: '*/5 * * * *'
-  workflow_run:
-    workflows: [Ingest]
-    types: [completed]
   workflow_dispatch:
-    inputs:
-      repack_from_r2:
-        description: Repack the active R2 snapshot without reading D1
-        type: boolean
-        default: false
-
 concurrency:
-  group: jingkan-snapshot
+  group: jingkan-publisher
   cancel-in-progress: false
-
 permissions:
   contents: read
-
 jobs:
   snapshot:
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Test
-        run: npm test
-
-      - name: Build and activate feed snapshot
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Repack current R2 state with fenced activation
         env:
           JINGKAN_BASE_URL: https://jing.show
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
-          SNAPSHOT_REPACK_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.repack_from_r2 && '1' || '0' }}
         run: npm run snapshot

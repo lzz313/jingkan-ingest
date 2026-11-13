@@ -1,15 +1,9 @@
 import type {
-  AdminRecentItem,
-  AdminUntranslatedItem,
   IngestRequest,
   IngestResponse,
   IngestStatus,
-  MaintenancePatch,
-  ModerateResponse,
   NormalizedItem,
   SourceId,
-  TranslateField,
-  TranslateResponse,
 } from '../shared/types';
 import type { IngestConfig } from './env';
 
@@ -50,7 +44,7 @@ export async function postIngest(
       items: chunk,
       // Only the final chunk represents the completed ingest run. Marking
       // intermediate pages partial avoids rewriting `last_updated` and makes
-      // the source status land in the same final transaction.
+      // the source status land in the final queued input event.
       partial: options.partial ?? index < chunks.length - 1,
       ...(options.sourceStatus && index === chunks.length - 1
         ? { sourceStatus: options.sourceStatus }
@@ -75,85 +69,3 @@ export async function postIngest(
   return { upserted, ids: allIds, dataVersion, lastUpdated };
 }
 
-export async function prewarmTranslations(
-  config: IngestConfig,
-  ids: string[],
-  field: TranslateField,
-): Promise<TranslateResponse> {
-  const translations: Record<string, string> = {};
-  // Body translations are much longer than titles and briefs; smaller chunks
-  // and a longer client timeout keep one slow item from failing the batch.
-  const chunkSize = field === 'body' ? 5 : 10;
-  const timeoutMs = field === 'body' ? 120_000 : 90_000;
-  for (let i = 0; i < ids.length; i += chunkSize) {
-    const chunk = ids.slice(i, i + chunkSize);
-    const response = await fetch(`${config.baseUrl}/api/translate`, {
-      method: 'POST',
-      headers: authHeaders(config),
-      body: JSON.stringify({ ids: chunk, field }),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!response.ok) throw new Error(`Translate prewarm failed: ${await readError(response)}`);
-    const result = (await response.json()) as TranslateResponse;
-    Object.assign(translations, result.translations);
-  }
-  return { translations };
-}
-
-export async function fetchAdminRecent(
-  config: IngestConfig,
-  limit = 200,
-): Promise<AdminRecentItem[]> {
-  const response = await fetch(`${config.baseUrl}/api/admin/recent?limit=${limit}`, {
-    headers: authHeaders(config),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) throw new Error(`Admin recent failed: ${await readError(response)}`);
-  const result = (await response.json()) as { items: AdminRecentItem[] };
-  return result.items;
-}
-
-export async function fetchAdminUntranslated(
-  config: IngestConfig,
-  limit = 20,
-): Promise<AdminUntranslatedItem[]> {
-  const response = await fetch(`${config.baseUrl}/api/admin/untranslated?limit=${limit}`, {
-    headers: authHeaders(config),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) throw new Error(`Admin untranslated failed: ${await readError(response)}`);
-  const result = (await response.json()) as { items: AdminUntranslatedItem[] };
-  return result.items;
-}
-
-export async function moderateItems(
-  config: IngestConfig,
-  limit = 60,
-): Promise<ModerateResponse> {
-  const response = await fetch(`${config.baseUrl}/api/admin/moderate`, {
-    method: 'POST',
-    headers: authHeaders(config),
-    body: JSON.stringify({ limit }),
-    // Up to three 20-post batches run at concurrency 2; give slow inference
-    // room without letting a hung call block the whole workflow.
-    signal: AbortSignal.timeout(150_000),
-  });
-  if (!response.ok) throw new Error(`Moderation failed: ${await readError(response)}`);
-  return (await response.json()) as ModerateResponse;
-}
-
-export async function postMaintenance(
-  config: IngestConfig,
-  patches: MaintenancePatch[],
-): Promise<number> {
-  if (patches.length === 0) return 0;
-  const response = await fetch(`${config.baseUrl}/api/admin/maintenance`, {
-    method: 'POST',
-    headers: authHeaders(config),
-    body: JSON.stringify({ patches }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) throw new Error(`Maintenance failed: ${await readError(response)}`);
-  const result = (await response.json()) as { updated: number };
-  return result.updated;
-}

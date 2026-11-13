@@ -21,7 +21,8 @@ export const SNAPSHOT_PACK_TARGET_BYTES = 8 * 1024 * 1024;
 const CANONICAL_CHUNK_BYTES = 256 * 1024;
 
 export interface SnapshotMeta {
-  syncRevision?: number;
+  lastIngestAttemptAt?: number;
+  processedEvents?: string[];
   removed?: Record<string, number>;
   lastUpdated: number;
   dataVersion: number;
@@ -48,6 +49,7 @@ export interface SnapshotManifest extends SnapshotMeta {
   canonicalParts: SnapshotRange[];
   itemIndexes: Record<string, SnapshotRange>;
   catalog: SnapshotRange;
+  generatorStateParts?: SnapshotRange[];
 }
 
 export interface SnapshotBuild {
@@ -245,6 +247,7 @@ export function buildSnapshot(
   meta: SnapshotMeta,
   generatedAt = Date.now(),
   targetBytes = SNAPSHOT_PACK_TARGET_BYTES,
+  generatorRecords?: unknown[],
 ): SnapshotBuild {
   const items = rawItems
     .filter((item) => !item.hidden)
@@ -328,6 +331,18 @@ export function buildSnapshot(
   const catalog = appendJson(items.map((item) => [
     item.id, item.source, item.publishedAt, item.fetchedAt, item.hotScore, item.isHot ? 1 : 0,
   ]));
+  const generatorStateParts: SnapshotRange[] = [];
+  if (generatorRecords) {
+    let records: unknown[] = [], recordBytes = 2;
+    for (const record of generatorRecords) {
+      const length = Buffer.byteLength(JSON.stringify(record)) + 1;
+      if (records.length && recordBytes + length > CANONICAL_CHUNK_BYTES) {
+        generatorStateParts.push(appendJson(records)); records = []; recordBytes = 2;
+      }
+      records.push(record); recordBytes += length;
+    }
+    generatorStateParts.push(appendJson(records));
+  }
   flush();
   // Leave room below the Workers Free per-request subrequest limit for ID
   // index reads, pointers and a bounded fallback.
@@ -348,6 +363,7 @@ export function buildSnapshot(
       canonicalParts,
       itemIndexes,
       catalog,
+      ...(generatorRecords ? { generatorStateParts } : {}),
       responses,
     },
   };
