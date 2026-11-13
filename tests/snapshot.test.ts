@@ -4,6 +4,7 @@ import {
   buildFeedResponse,
   buildSnapshot,
   feedQueryKey,
+  itemShard,
   type FeedQuery,
   type SnapshotMeta,
 } from '../src/ingest/snapshot';
@@ -141,6 +142,17 @@ describe('snapshot artifact', () => {
       expect(range.offset + range.length).toBeLessThanOrEqual(part.body.length);
       expect(() => JSON.parse(part.body.subarray(range.offset, range.offset + range.length).toString())).not.toThrow();
     }
+  });
+
+  it('indexes exact UTF-8 item bytes independently of canonical block size', () => {
+    const source = [item('x:汉字', 'x', NOW, { body: '含中文、emoji 🚀 和换行\n' })];
+    const { artifacts, manifest } = buildSnapshot(source, meta, NOW);
+    const indexRange = manifest.itemIndexes[itemShard(source[0]!.id)]!;
+    const indexArtifact = artifacts.find((entry) => entry.key === indexRange.key)!;
+    const index = JSON.parse(indexArtifact.body.subarray(indexRange.offset, indexRange.offset + indexRange.length).toString()) as Record<string, { key: string; offset: number; length: number }>;
+    const range = index[source[0]!.id]!;
+    const part = artifacts.find((entry) => entry.key === range.key)!;
+    expect(JSON.parse(part.body.subarray(range.offset, range.offset + range.length).toString())).toEqual(source[0]);
   });
 
 });

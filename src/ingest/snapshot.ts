@@ -46,6 +46,8 @@ export interface SnapshotManifest extends SnapshotMeta {
   responses: Record<string, SnapshotRange>;
   artifacts: Array<{ key: string; size: number; sha256: string }>;
   canonicalParts: SnapshotRange[];
+  itemIndexes: Record<string, SnapshotRange>;
+  catalog: SnapshotRange;
 }
 
 export interface SnapshotBuild {
@@ -232,6 +234,12 @@ function dateWindows(now: number): Array<{ from?: number; to?: number }> {
   ];
 }
 
+export function itemShard(id: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < id.length; i++) hash = Math.imul(hash ^ id.charCodeAt(i), 16777619);
+  return String(hash >>> 0 & 7);
+}
+
 export function buildSnapshot(
   rawItems: FeedItem[],
   meta: SnapshotMeta,
@@ -290,20 +298,40 @@ export function buildSnapshot(
   }
 
   const canonicalParts: SnapshotRange[] = [];
+  const indexes: Record<string, Record<string, SnapshotRange>> = {};
+  const appendItems = (group: FeedItem[]) => {
+    const range = appendJson(group);
+    canonicalParts.push(range);
+    let offset = range.offset + 1; // Opening '['; each item is a standalone JSON slice.
+    for (const item of group) {
+      const length = Buffer.byteLength(JSON.stringify(item));
+      (indexes[itemShard(item.id)] ??= {})[item.id] = { key: range.key, offset, length };
+      offset += length + 1;
+    }
+  };
   let group: FeedItem[] = [];
   let groupBytes = 2;
   for (const item of items) {
     const size = Buffer.byteLength(JSON.stringify(item)) + 1;
     if (group.length > 0 && groupBytes + size > CANONICAL_CHUNK_BYTES) {
-      canonicalParts.push(appendJson(group));
+      appendItems(group);
       group = [];
       groupBytes = 2;
     }
     group.push(item);
     groupBytes += size;
   }
-  canonicalParts.push(appendJson(group));
+  appendItems(group);
+  const itemIndexes: Record<string, SnapshotRange> = {};
+  for (const [shard, index] of Object.entries(indexes)) itemIndexes[shard] = appendJson(index);
+  // Small tuples support uncommon date/limit queries without parsing bodies.
+  const catalog = appendJson(items.map((item) => [
+    item.id, item.source, item.publishedAt, item.fetchedAt, item.hotScore, item.isHot ? 1 : 0,
+  ]));
   flush();
+  // Leave room below the Workers Free per-request subrequest limit for ID
+  // index reads, pointers and a bounded fallback.
+  if (artifacts.length > 32) throw new Error('Snapshot exceeds 32 artifacts; active version retained');
   const first = artifacts[0]!;
   return {
     artifacts,
@@ -318,6 +346,8 @@ export function buildSnapshot(
       artifacts: artifacts.map(({ key, body, sha256 }) => ({ key, size: body.length, sha256 })),
       canonical: canonicalParts[0]!,
       canonicalParts,
+      itemIndexes,
+      catalog,
       responses,
     },
   };
