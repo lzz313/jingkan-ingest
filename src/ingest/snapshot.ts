@@ -21,6 +21,8 @@ export const SNAPSHOT_PACK_TARGET_BYTES = 8 * 1024 * 1024;
 const CANONICAL_CHUNK_BYTES = 256 * 1024;
 
 export interface SnapshotMeta {
+  syncRevision?: number;
+  removed?: Record<string, number>;
   lastUpdated: number;
   dataVersion: number;
   lastRefreshAt: number;
