@@ -70,7 +70,9 @@ export async function fetchGithub(now = Date.now()): Promise<NormalizedItem[]> {
         lang: language || undefined,
         timeSource: 'trending',
       },
-      contentHash: hashText(`${fullName}\n${description}\n${starsToday}`),
+      // Star count is a fast-moving metric. Keeping it out of the content hash
+      // lets D1 throttle metric writes without also postponing text edits.
+      contentHash: hashText(`${fullName}\n${description}`),
     });
   });
 

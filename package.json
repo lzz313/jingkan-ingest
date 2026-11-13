@@ -6,6 +6,7 @@
   "description": "Scheduled ingestion workers for JingKan",
   "scripts": {
     "ingest": "tsx src/ingest/run.ts",
+    "snapshot": "tsx src/ingest/snapshot-run.ts",
     "backfill": "tsx src/ingest/backfill.ts",
     "moderate": "tsx src/ingest/moderate.ts",
     "typecheck": "tsc --noEmit",

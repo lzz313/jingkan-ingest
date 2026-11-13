@@ -103,7 +103,7 @@ export interface FeedItem {
   contentHash: string | null;
 }
 
-export type FeedView = 'latest' | 'hot';
+export type FeedView = 'latest' | 'hot' | 'rising';
 
 export interface SourceCounts {
   all: number;
@@ -116,6 +116,7 @@ export interface FeedResponse {
   counts: SourceCounts;
   totals: {
     hot: number;
+    rising: number;
   };
   lastUpdated: number;
   dataVersion: number;

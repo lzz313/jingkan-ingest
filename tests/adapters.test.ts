@@ -317,6 +317,21 @@ describe('GitHub Trending adapter', () => {
     expect(items.every((item) => item.publishedAt < fixedNow)).toBe(true);
     expect(items.every((item) => item.publishedAt >= fixedNow - 60_000)).toBe(true);
   });
+
+  it('keeps stars-today out of the content hash used for edit detection', async () => {
+    const now = Date.UTC(2026, 10, 12, 8, 35);
+    const load = async (stars: string) => {
+      const html = fixture('github.html').replace('3,108 stars today', `${stars} stars today`);
+      vi.stubGlobal('fetch', async () => new Response(html, {
+        headers: { 'content-type': 'text/html' },
+      }));
+      return (await fetchGithub(now))[0]!;
+    };
+    const low = await load('3,108');
+    const high = await load('9,999');
+    expect(high.metrics?.starsToday).not.toBe(low.metrics?.starsToday);
+    expect(high.contentHash).toBe(low.contentHash);
+  });
 });
 
 describe('X adapter', () => {
@@ -514,6 +529,23 @@ describe('AI and product adapters', () => {
     expect(items[0]!.metrics).toEqual({ upvotes: 42, comments: 6 });
     expect(items[0]!.extra?.arxivUrl).toBe('https://arxiv.org/abs/2611.16321');
     expect(items[0]!.images?.some((url) => url.includes('cdn-thumbnails.huggingface.co'))).toBe(true);
+  });
+
+  it('keeps upvotes out of the Hugging Face content hash', async () => {
+    const load = async (upvotes: number) => {
+      const payload = JSON.parse(fixture('huggingface-daily.json')) as Array<{
+        paper: { upvotes: number };
+      }>;
+      payload[0]!.paper.upvotes = upvotes;
+      vi.stubGlobal('fetch', async () => new Response(JSON.stringify(payload), {
+        headers: { 'content-type': 'application/json' },
+      }));
+      return (await fetchHuggingFacePapers(now))[0]!;
+    };
+    const low = await load(42);
+    const high = await load(420);
+    expect(high.metrics?.upvotes).toBe(420);
+    expect(high.contentHash).toBe(low.contentHash);
   });
 
   it('keeps only recent AI-tagged Simon Willison entries', async () => {

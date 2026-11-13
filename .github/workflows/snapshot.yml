@@ -1,0 +1,46 @@
+name: Snapshot
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_run:
+    workflows: [Ingest]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: jingkan-snapshot
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build and activate feed snapshot
+        env:
+          JINGKAN_BASE_URL: https://jing.show
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+        run: npm run snapshot

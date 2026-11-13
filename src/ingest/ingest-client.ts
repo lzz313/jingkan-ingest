@@ -48,7 +48,10 @@ export async function postIngest(
   for (const [index, chunk] of chunks.entries()) {
     const body: IngestRequest = {
       items: chunk,
-      partial: options.partial ?? false,
+      // Only the final chunk represents the completed ingest run. Marking
+      // intermediate pages partial avoids rewriting `last_updated` and makes
+      // the source status land in the same final transaction.
+      partial: options.partial ?? index < chunks.length - 1,
       ...(options.sourceStatus && index === chunks.length - 1
         ? { sourceStatus: options.sourceStatus }
         : {}),

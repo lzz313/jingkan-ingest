@@ -96,7 +96,9 @@ export function parseHuggingFacePapers(
         ...(paper.githubRepo ? { relatedUrls: [paper.githubRepo] } : {}),
         timeSource: 'digest',
       },
-      contentHash: hashText(`${externalId}\n${title}\n${body}\n${paper.upvotes ?? 0}`),
+      // Upvotes change independently of the paper text; see the D1 upsert
+      // throttling rule.
+      contentHash: hashText(`${externalId}\n${title}\n${body}`),
     });
   }
 

@@ -2,6 +2,8 @@
 
 静看（JingKan）的定时抓取仓库。它只负责从各个来源拉取内容，并通过 Worker 的 `/api/ingest` 接口写入 D1；Worker、Web 界面和数据库配置在私有仓库中。
 
+它同时每 5 分钟把 D1 中最近 35 天的公开内容导出为 R2 快照，并在完整校验后原子切换线上读取版本。
+
 ## 抓取来源
 
 - X（`X 榜单` 收录 xbangdan 的 `ai_coding` 内容，`Tech Twitter` 补充近期 AI / 开发趋势）
@@ -37,6 +39,8 @@ X 在页面上仍是一个频道，内部由两个公开入口互补：`X 榜单
 
 其余时间不抓取。GitHub Actions 的 schedule 是尽力而为，实际执行可能晚几分钟。
 
+`Snapshot` workflow 每个整 5 分钟运行一次，也会在每轮 `Ingest` 完成后触发。它使用同一个 `INGEST_TOKEN`，先生成并上传快照，再切换当前指针；上传或校验失败时线上继续使用上一有效版本。
+
 ## 配置
 
 在仓库的 **Settings → Secrets and variables → Actions** 中设置：
@@ -60,11 +64,14 @@ npm test
 JINGKAN_BASE_URL=http://127.0.0.1:8787 INGEST_TOKEN=<local-dev-token> npm run ingest
 JINGKAN_BASE_URL=http://127.0.0.1:8787 INGEST_TOKEN=<local-dev-token> npm run backfill
 JINGKAN_BASE_URL=http://127.0.0.1:8787 INGEST_TOKEN=<local-dev-token> npm run moderate
+JINGKAN_BASE_URL=http://127.0.0.1:8787 INGEST_TOKEN=<local-dev-token> npm run snapshot
 ```
 
 `npm run backfill` 会补抓取轮次没翻完的 HN 标题和正文：最多 12 轮、每轮 20 条、8 分钟墙钟上限；workflow 在每次 ingest 之后自动执行，`continue-on-error`，失败不影响抓取结果。
 
 `npm run moderate` 在回填之后调用 Worker 的 `/api/admin/moderate`，分批审核 V2EX / NodeSeek / LINUX DO 的新条目：垃圾广告/引流和低质量水帖直接隐藏。最多 6 轮、每轮 60 条、3 分钟墙钟上限；连续两轮没有进展（例如 Workers AI 不可用）就停止。两次调用间隔里如果有新条目，会在下一轮 workflow 继续。
+
+`npm run snapshot` 导出全部来源、构建热门/上升榜和各日期筛选的预序列化响应，再上传约 29 MB 的当前数据包。构建完全在 GitHub runner 上完成，不占用 Cloudflare 免费 Worker 的 10ms CPU 配额。
 
 ## 维护提示
 
