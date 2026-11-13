@@ -91,13 +91,16 @@ export const SOURCES: Record<SourceId, SourceMeta> = {
 
 export const SOURCE_ORDER: SourceId[] = [...SOURCE_IDS];
 
+/**
+ * Descriptive English titles are translated automatically. Product Hunt
+ * titles are product names, so they stay in their original form.
+ */
 export const TITLE_TRANSLATION_SOURCES: ReadonlySet<SourceId> = new Set([
   'hn',
   'reddit',
   'hf-papers',
   'simonw',
   'google-ai',
-  'producthunt',
 ]);
 
 export const BRIEF_TRANSLATION_SOURCES: ReadonlySet<SourceId> = new Set([

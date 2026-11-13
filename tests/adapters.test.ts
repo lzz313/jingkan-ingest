@@ -319,25 +319,59 @@ describe('GitHub Trending adapter', () => {
   });
 });
 
-describe('X daily report adapter', () => {
-  it('parses stories, core posts, metrics and snowflake times', async () => {
+describe('X adapter', () => {
+  it('merges xbangdan boards, keeps AI coding posts and uses exact metrics', async () => {
     stubFetch([
-      { match: '2026-11-11-X', file: 'x-report.html', type: 'text/html' },
-      { match: 'aitimeline.news/Daily/', file: 'x-index.html', type: 'text/html' },
+      { match: 'xbangdan.com/posts/', file: 'xbangdan-posts.html', type: 'text/html' },
+      { match: 'xbangdan.com/hot.json', file: 'xbangdan-hot.json', type: 'application/json' },
     ]);
-    const items = await fetchX();
-    expect(items.length).toBeGreaterThan(5);
-    expect(items.every((item) => (item.extra?.corePosts?.length ?? 0) > 0)).toBe(true);
-    expect(items.some((item) => item.externalId === '_1')).toBe(false);
+    const now = Date.UTC(2026, 10, 13, 20, 0);
+    const items = await fetchX(now);
+
+    expect(items).toHaveLength(2);
+    expect(items.every((item) => item.extra?.category === 'AI 编程')).toBe(true);
+    expect(items.some((item) => item.externalId === '2121044759062159705')).toBe(false);
+
     const first = items[0]!;
     expect(first.source).toBe('x');
-    expect(first.title).toContain('Gemini 4 Carbon');
-    expect(first.extra?.corePosts?.length).toBeGreaterThan(0);
-    expect(first.extra?.relatedUrls?.length).toBeGreaterThan(0);
-    expect(first.metrics?.views).toBeGreaterThan(100_000);
+    expect(first.externalId).toBe('2121072773418340838');
+    expect(first.title).toMatch(/miniMax H3/i);
+    expect(first.url).toBe(
+      'https://x.com/shangdu2005/status/2121072773418340838',
+    );
+    expect(first.author).toBe('领哥');
+    expect(first.authorHandle).toBe('shangdu2005');
+    expect(first.metrics).toEqual({
+      views: 257251,
+      likes: 319,
+      viewsPerHour: 321320,
+    });
+    expect(first.extra?.corePosts?.[0]).toMatchObject({
+      url: first.url,
+      handle: 'shangdu2005',
+      views: 257251,
+      likes: 319,
+    });
     expect(first.publishedAt).toBeGreaterThan(Date.UTC(2026, 0, 1));
-    expect(first.publishedAt).toBeLessThan(Date.UTC(2026, 10, 12));
-    expect(first.authorHandle).toBe('Google');
+    expect(first.publishedAt).toBeLessThan(now);
+  });
+
+  it('falls back to the server-rendered board when hot.json is unavailable', async () => {
+    stubFetch([
+      { match: 'xbangdan.com/posts/', file: 'xbangdan-posts.html', type: 'text/html' },
+    ]);
+    const items = await fetchX(Date.UTC(2026, 10, 13, 20, 0));
+    expect(items).toHaveLength(2);
+    expect(items[0]!.externalId).toBe('2121072773418340838');
+    expect(items[0]!.metrics?.likes).toBe(319);
+    expect(items[0]!.metrics?.views).toBeUndefined();
+  });
+
+  it('rejects when both public boards are unavailable', async () => {
+    stubFetch([]);
+    await expect(fetchX()).rejects.toThrow(
+      'xbangdan posts and hot.json both failed',
+    );
   });
 });
 

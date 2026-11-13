@@ -4,7 +4,7 @@
 
 ## 抓取来源
 
-- X
+- X（公开榜单 `xbangdan.com`，只收录 `ai_coding` 内容）
 - V2EX
 - NodeSeek
 - LINUX DO
@@ -40,7 +40,7 @@ Simon Willison、Google AI 和 Product Hunt 没有可靠的互动指标，因此
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
 | `INGEST_TOKEN` | Secret | 与 Worker 的 `INGEST_TOKEN` secret 相同 |
-| `PREWARM_TRANSLATIONS` | Variable | 可选，设为 `0` 可关闭翻译预热与回填（HN 标题/正文、Reddit 标题、GitHub 简介、AI 来源标题/摘要） |
+| `PREWARM_TRANSLATIONS` | Variable | 可选，设为 `0` 可关闭翻译预热与回填（HN 标题/正文、Reddit 标题、GitHub 简介、AI 来源标题/摘要；Product Hunt 保留产品名并翻译简介） |
 | `AI_MODERATION` | Variable | 可选，设为 `0` 可关闭社区内容 AI 审核（V2EX / NodeSeek / LINUX DO） |
 
 Worker 地址直接写在 `.github/workflows/ingest.yml` 里（目前是 `https://jing.show`）；换自定义域名时同步修改即可。

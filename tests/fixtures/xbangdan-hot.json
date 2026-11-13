@@ -1,0 +1,40 @@
+{
+  "updated": 1794549962,
+  "rate": [
+    {
+      "id": "2121072773418340838",
+      "h": "shangdu2005",
+      "n": "领哥",
+      "t": "miniMax H3 发布了新的编程模型！ 可以直接生成完整项目，并修复跨仓库测试。",
+      "v": 257251,
+      "r": 321320,
+      "l": 319,
+      "age": 3.29,
+      "c": "ai_coding"
+    },
+    {
+      "id": "2121044759062159705",
+      "h": "finance",
+      "n": "Finance Daily",
+      "t": "Market news that should not enter the AI feed.",
+      "v": 999999,
+      "r": 999999,
+      "l": 88,
+      "age": 5.1,
+      "c": "finance"
+    }
+  ],
+  "views": [
+    {
+      "id": "2121000000000000000",
+      "h": "coder",
+      "n": "Code Daily",
+      "t": "A new coding agent benchmark just changed the leaderboard.",
+      "v": 82000,
+      "r": 10933,
+      "l": 42,
+      "age": 7.5,
+      "c": "ai_coding"
+    }
+  ]
+}
