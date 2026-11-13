@@ -7,6 +7,11 @@ on:
     workflows: [Ingest]
     types: [completed]
   workflow_dispatch:
+    inputs:
+      repack_from_r2:
+        description: Repack the active R2 snapshot without reading D1
+        type: boolean
+        default: false
 
 concurrency:
   group: jingkan-snapshot
@@ -43,4 +48,5 @@ jobs:
         env:
           JINGKAN_BASE_URL: https://jing.show
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+          SNAPSHOT_REPACK_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.repack_from_r2 && '1' || '0' }}
         run: npm run snapshot

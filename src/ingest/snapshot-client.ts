@@ -114,8 +114,22 @@ export async function collectSnapshot(config: IngestConfig): Promise<{ items: Fe
   throw new Error('Snapshot source changed during export; keeping the active snapshot');
 }
 
-export async function runSnapshot(config: IngestConfig): Promise<void> {
-  const { items, meta } = await collectSnapshot(config);
+export async function runSnapshot(config: IngestConfig, options: { repackOnly?: boolean } = {}): Promise<void> {
+  let state: { items: FeedItem[]; meta: SnapshotMeta };
+  if (options.repackOnly) {
+    const base = await (await call(config, '/api/admin/snapshot/base')).json() as BaseManifest;
+    state = {
+      items: await readBaseItems(config, base),
+      meta: {
+        lastUpdated: base.lastUpdated, dataVersion: base.dataVersion, lastRefreshAt: base.lastRefreshAt,
+        sources: base.sources, syncRevision: base.syncRevision, removed: base.removed,
+      },
+    };
+    console.log(`[snapshot] repacking ${base.snapshotId}; source timestamps preserved`);
+  } else {
+    state = await collectSnapshot(config);
+  }
+  const { items, meta } = state;
   const { artifacts, manifest } = buildSnapshot(items, meta);
   console.log(`[snapshot] built ${manifest.snapshotId}: ${items.length} items, ${manifest.packSize} bytes, ${artifacts.length} parts`);
   for (const [part, artifact] of artifacts.entries()) {

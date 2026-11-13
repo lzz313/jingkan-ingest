@@ -77,3 +77,17 @@ JINGKAN_BASE_URL=http://127.0.0.1:8787 INGEST_TOKEN=<local-dev-token> npm run sn
 
 - 公开发布仓库的定时 workflow 在 60 天没有仓库活动后可能被 GitHub 自动禁用；仓库已内置 `Keepalive` workflow，每月 1 日自动提交一次来重置计时。
 - 建议开启分支保护，并要求外部贡献者的 Actions 运行需人工批准。
+
+## R2 增量快照
+
+`Snapshot` 每 5 分钟及 Ingest 结束后运行。首次导出 35 天窗口，之后按条目修订号读取变化与隐藏记录，未变化的数据从 R2 复用；排名和日期窗口仍会重算。Worker 为导出设置每日 200 万读取行预算，触及预算或 D1 额度后自动退避到下一个 UTC 零点，现有快照持续提供服务。
+
+v2 快照按目标 8 MiB 拆包，最多 32 个包；manifest 包含大小、SHA-256、响应范围、分片 ID 索引和轻量排名目录。全部上传校验成功后才切换当前指针；v1 读取仍兼容。
+
+仅转换现有 R2 快照格式、跳过 D1 时，可手动运行：
+
+```bash
+gh workflow run snapshot.yml --repo lzz313/jingkan-ingest -f repack_from_r2=true
+```
+
+此操作保留原内容更新时间和增量水位，不代表重新抓取了来源数据。正常定时运行会恢复 D1 增量同步。

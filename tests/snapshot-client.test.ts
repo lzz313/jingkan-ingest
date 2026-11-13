@@ -13,7 +13,7 @@ const post = (id: string): FeedItem => ({
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 afterEach(() => vi.unstubAllGlobals());
 
-function mockServer(nextVersion: number) {
+function mockServer(nextVersion: number, acceptUploads = false) {
   const baseItems = [post('x:1'), post('x:2')];
   const meta = { dataVersion: 1, lastUpdated: 1, lastRefreshAt: 0, sources: {}, syncRevision: 1 };
   const base = buildSnapshot(baseItems, meta);
@@ -28,7 +28,8 @@ function mockServer(nextVersion: number) {
       return new Response(new Uint8Array(artifact.body));
     }
     if (url.pathname.endsWith('/sync')) return json({ items: [post('x:3')], removed: [{ id: 'x:1', publishedAt: Date.now() }], rowsRead: 2, nextCursor: null });
-    if (init?.method === 'PUT') return json({ error: 'upload failed' }, 503);
+    if (init?.method === 'PUT') return acceptUploads ? json({ ok: true }) : json({ error: 'upload failed' }, 503);
+    if (init?.method === 'POST' && url.pathname.endsWith('/activate') && acceptUploads) return json({ ok: true });
     throw new Error('Unexpected request: ' + url.pathname);
   }));
   return paths;
@@ -60,4 +61,11 @@ describe('incremental snapshot generation', () => {
     await expect(collectSnapshot(config)).rejects.toBeInstanceOf(SnapshotDeferred);
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+  it('can migrate an existing R2 snapshot without using D1 or changing source timestamps', async () => {
+    const paths = mockServer(1, true);
+    await runSnapshot(config, { repackOnly: true });
+    expect(paths.some((path) => path.includes('/sync'))).toBe(false);
+    expect(paths.some((path) => path.includes('/activate'))).toBe(true);
+  });
+
 });
