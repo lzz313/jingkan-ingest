@@ -1,3 +1,4 @@
+import { isUsableTranslation, translationText } from '../shared/translation';
 import type { FeedItem, NormalizedItem, SourceId, SourceStatus, IngestStatus } from '../shared/types';
 import { normalizeItem } from '../shared/normalize';
 import { computeHot } from '../shared/scoring';
@@ -86,7 +87,8 @@ export function applyEvent(state: GeneratorState, event: InputEvent): void {
       const record = state.records.get(entry.id);
       if (!record || record.item.contentHash !== entry.contentHash || !['titleZh', 'briefZh', 'bodyZh'].includes(entry.field) || typeof entry.text !== 'string') continue;
       if (entry.field === 'titleZh' && !sourceNeedsTitleTranslation(record.item.source)) continue;
-      record.item[entry.field] = entry.text;
+      const field = entry.field === 'titleZh' ? 'title' : entry.field === 'briefZh' ? 'brief' : 'body';
+      if (isUsableTranslation(translationText(record.item, field), entry.text)) record.item[entry.field] = entry.text;
     }
   }
   if (event.kind === 'maintenance' && Array.isArray(event.patches)) {
@@ -105,6 +107,22 @@ export function updateSources(state: GeneratorState, status: Partial<Record<Sour
     state.sources[source] = { ok: value.ok, lastUpdated: now, ...(value.error ? { lastError: value.error } : {}) };
   }
   if (Object.values(status).some((entry) => entry?.ok && (entry.count ?? 0) > 0)) state.lastUpdated = Math.max(state.lastUpdated, now);
+}
+/** Apply current policy to retained records too, including posts no longer returned by a source. */
+export function reconcileState(state: GeneratorState): { hidden: number; translationsReset: number } {
+  let hidden = 0, translationsReset = 0;
+  for (const record of state.records.values()) {
+    if (!record.ruleHidden && shouldHideItem(record.item)) {
+      record.ruleHidden = true; record.item.hidden = true; hidden++;
+    }
+    for (const field of ['title', 'brief', 'body'] as const) {
+      const target = field === 'title' ? 'titleZh' : field === 'brief' ? 'briefZh' : 'bodyZh';
+      if (record.item[target] && !isUsableTranslation(translationText(record.item, field), record.item[target])) {
+        record.item[target] = null; translationsReset++;
+      }
+    }
+  }
+  return { hidden, translationsReset };
 }
 export function pruneState(state: GeneratorState, cutoff: number): void {
   for (const [id, record] of state.records) if (record.item.publishedAt < cutoff) state.records.delete(id);

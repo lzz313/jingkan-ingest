@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import type { FeedItem, TranslateField } from '../shared/types';
-import { sourceNeedsTitleTranslation } from '../shared/sources';
+import { itemNeedsTranslation } from '../shared/translation';
 import type { IngestConfig } from './env';
 import { call, post, readBase, readBaseItems, readBaseRecords, uploadSnapshot } from './snapshot-client';
 import { buildSnapshot } from './snapshot';
 import { fetchSources } from './sources';
-import { applyEvent, bootstrapRecords, isSourceWindow, mergeItems, pruneState, removedItems, updateSources, visibleItems,
+import { applyEvent, bootstrapRecords, isSourceWindow, mergeItems, reconcileState, pruneState, removedItems, updateSources, visibleItems,
   type EnrichmentEntry, type GeneratorState, type InputEvent, type StoredItem } from './state';
 
 interface LeaseState { lease: { token: string; expiresAt: number }; lastRefreshAt: number }
-export interface PublishOptions { repackOnly?: boolean; forceFetch?: boolean }
+export interface PublishOptions { repackOnly?: boolean; forceFetch?: boolean; translationLimit?: number }
 async function pendingEvents(config: IngestConfig): Promise<Array<{ key: string; event: InputEvent }>> {
   const keys: string[] = [];
   let cursor: string | null = null;
@@ -43,7 +43,7 @@ export function selectBacklog(items: FeedItem[], limit: number): FeedItem[] {
   }
   return selected;
 }
-async function enrich(config: IngestConfig, state: GeneratorState): Promise<void> {
+async function enrich(config: IngestConfig, state: GeneratorState, translationLimit = 60): Promise<void> {
   const records = [...state.records.values()].filter((record) => !record.ruleHidden).sort((a, b) => b.item.publishedAt - a.item.publishedAt);
   const pending = selectBacklog(records.filter((record) => record.moderation === 'pending').map((r) => r.item), 60);
   for (let offset = 0; offset < pending.length; offset += 20) {
@@ -60,9 +60,9 @@ async function enrich(config: IngestConfig, state: GeneratorState): Promise<void
   if (!config.prewarmTranslations) return;
   const visible = records.filter((record) => record.moderation === 'keep').map((r) => r.item);
   const tasks: Array<{ field: TranslateField; items: FeedItem[] }> = [
-    { field: 'title', items: selectBacklog(visible.filter((item) => sourceNeedsTitleTranslation(item.source) && !item.titleZh), 30) },
-    { field: 'brief', items: selectBacklog(visible.filter((item) => ['github', 'hf-papers', 'simonw', 'google-ai', 'producthunt'].includes(item.source) && !item.briefZh && Boolean(item.brief || item.body)), 30) },
-    { field: 'body', items: selectBacklog(visible.filter((item) => item.source === 'hn' && !item.bodyZh && Boolean(item.body)), 20) },
+    { field: 'title', items: selectBacklog(visible.filter((item) => itemNeedsTranslation(item, 'title')), translationLimit) },
+    { field: 'brief', items: selectBacklog(visible.filter((item) => itemNeedsTranslation(item, 'brief')), 30) },
+    { field: 'body', items: selectBacklog(visible.filter((item) => itemNeedsTranslation(item, 'body')), 20) },
   ];
   for (const task of tasks) {
     for (let offset = 0; offset < task.items.length; offset += 10) {
@@ -106,7 +106,8 @@ export async function runPublisher(config: IngestConfig, options: PublishOptions
     }
     if (!options.repackOnly) {
       pruneState(state, now - 35 * 86400000);
-      await enrich(config, state);
+      console.log('[publish] policy reconciliation:', JSON.stringify(reconcileState(state)));
+      await enrich(config, state, options.translationLimit);
     }
     const items = visibleItems(state);
     const built = buildSnapshot(items, {

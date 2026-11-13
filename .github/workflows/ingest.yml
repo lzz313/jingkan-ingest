@@ -8,6 +8,10 @@ on:
         description: Fetch all sources immediately
         type: boolean
         default: true
+      translation_limit:
+        description: Maximum titles to translate, including repair of old untranslated results
+        type: number
+        default: 60
 concurrency:
   group: jingkan-publisher
   cancel-in-progress: false
@@ -31,5 +35,6 @@ jobs:
           JINGKAN_BASE_URL: https://jing.show
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
           PREWARM_TRANSLATIONS: ${{ vars.PREWARM_TRANSLATIONS || '1' }}
+          TITLE_TRANSLATION_LIMIT: ${{ inputs.translation_limit || '60' }}
           FORCE_FETCH: ${{ github.event_name == 'workflow_dispatch' && inputs.force_fetch && '1' || '0' }}
         run: npm run ingest

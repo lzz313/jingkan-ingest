@@ -61,7 +61,7 @@ export function normalizeItem(raw: NormalizedItem, now = Date.now()): Normalized
     metrics,
     images,
     extra,
-    hidden: raw.hidden ?? shouldHideItem({ source: raw.source as SourceId, title, body, url }),
+    hidden: Boolean(raw.hidden || shouldHideItem({ source: raw.source as SourceId, title, body, url, extra })),
     contentHash: raw.contentHash ?? hashText(`${title}\n${body}\n${url}`),
   };
 

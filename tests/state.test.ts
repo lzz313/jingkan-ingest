@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyEvent, bootstrapRecords, mergeItems, pruneState, removedItems, updateSources, visibleItems, isSourceWindow, type GeneratorState } from '../src/ingest/state';
+import { applyEvent, bootstrapRecords, reconcileState, mergeItems, pruneState, removedItems, updateSources, visibleItems, isSourceWindow, type GeneratorState } from '../src/ingest/state';
 import type { NormalizedItem, FeedItem } from '../src/shared/types';
 const now = Date.UTC(2026, 10, 13, 2);
 function state(): GeneratorState { return { records: new Map(), sources: {}, lastUpdated: 0, lastRefreshAt: 0, lastIngestAttemptAt: 0 }; }
@@ -100,5 +100,27 @@ describe('events, retention and source freshness', () => {
     expect(isSourceWindow(Date.UTC(2026, 10, 13, 4, 15))).toBe(false);
     expect(isSourceWindow(Date.UTC(2026, 10, 13, 4, 30))).toBe(true);
     expect(isSourceWindow(Date.UTC(2026, 10, 13, 16))).toBe(false);
+  });
+});
+
+describe('policy repair of retained data', () => {
+  it('removes old promotion-node posts even when the source no longer returns them', () => {
+    const s = state(); mergeItems(s, [post({ source: 'v2ex', extra: { node: 'programmer' } })], now);
+    const record = s.records.get('v2ex:1')!; record.moderation = 'keep'; record.item.extra = { node: 'promotions', nodeTitle: '推广' };
+    expect(reconcileState(s).hidden).toBe(1);
+    expect(visibleItems(s)).toEqual([]); expect(removedItems(s)).toHaveProperty('v2ex:1');
+  });
+  it('clears old English echoes and rejects their journal replay', () => {
+    const s = state(); mergeItems(s, [post()], now);
+    const record = s.records.get('hn:1')!; record.item.titleZh = record.item.title;
+    expect(reconcileState(s).translationsReset).toBe(1); expect(record.item.titleZh).toBeNull();
+    applyEvent(s, { kind: 'enrichment', createdAt: now, entries: [{ id: 'hn:1', contentHash: record.item.contentHash, field: 'titleZh', text: record.item.title }] });
+    expect(record.item.titleZh).toBeNull();
+  });
+  it('preserves a Chinese X title translation on subsequent metric updates', () => {
+    const s = state(); mergeItems(s, [post({ source: 'x' })], now);
+    s.records.get('x:1')!.item.titleZh = '编译器研究';
+    mergeItems(s, [post({ source: 'x' })], now + 3600000);
+    expect(s.records.get('x:1')!.item.titleZh).toBe('编译器研究');
   });
 });

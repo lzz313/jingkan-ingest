@@ -1,4 +1,4 @@
-import type { SourceId } from './types';
+import type { ItemExtra, SourceId } from './types';
 
 const COMMUNITY_SOURCES: SourceId[] = ['v2ex', 'nodeseek', 'linuxdo'];
 
@@ -85,8 +85,11 @@ export function shouldHideItem(item: {
   title: string;
   body?: string | null;
   url?: string;
+  extra?: ItemExtra;
 }): boolean {
   if (!COMMUNITY_SOURCES.includes(item.source)) return false;
+  // The source explicitly categorizes this node as promotion, regardless of technical keywords.
+  if (item.source === 'v2ex' && (item.extra?.node?.trim().toLowerCase() === 'promotions' || item.extra?.nodeTitle?.trim() === '推广')) return true;
   const text = `${item.title}\n${item.body ?? ''}`;
   const normalized = text.toLowerCase();
 

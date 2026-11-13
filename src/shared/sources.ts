@@ -96,6 +96,7 @@ export const SOURCE_ORDER: SourceId[] = [...SOURCE_IDS];
  * titles are product names, so they stay in their original form.
  */
 export const TITLE_TRANSLATION_SOURCES: ReadonlySet<SourceId> = new Set([
+  'x',
   'hn',
   'reddit',
   'hf-papers',
