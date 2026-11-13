@@ -5,6 +5,7 @@ import type { IngestConfig } from './env';
 import { call, post, readBase, readBaseItems, readBaseRecords, uploadSnapshot } from './snapshot-client';
 import { buildSnapshot } from './snapshot';
 import { fetchSources } from './sources';
+import { publishDailyDigests } from './daily';
 import { applyEvent, bootstrapRecords, isSourceWindow, mergeItems, deduplicateStateImages, reconcileState, pruneState, removedItems, updateSources, visibleItems,
   type EnrichmentEntry, type GeneratorState, type InputEvent, type StoredItem } from './state';
 
@@ -126,6 +127,10 @@ export async function runPublisher(config: IngestConfig, options: PublishOptions
     console.log(`[publish] built ${items.length} visible / ${state.records.size} retained, ${built.artifacts.length} packs`);
     await uploadSnapshot(config, built, token, base.snapshotId);
     console.log(`[publish] activated ${built.manifest.snapshotId}; source lastUpdated=${new Date(state.lastUpdated).toISOString()}`);
+    if (!options.repackOnly) {
+      const archived = await publishDailyDigests(config, items, token, built.manifest.snapshotId);
+      console.log(`[publish] updated ${archived} daily archives`);
+    }
     for (let offset = 0; offset < events.length; offset += 100) {
       await post(config, '/api/admin/events/ack', { keys: events.slice(offset, offset + 100).map((event) => event.key), snapshotId: built.manifest.snapshotId, token });
     }

@@ -39,6 +39,7 @@ function mockServer(options: { uploadFails?: boolean; conflict?: boolean; renewF
     }
     if (url.pathname.endsWith('/cleanup')) return json({ cursor: null });
     if (url.pathname.endsWith('/ack')) return json({ ok: true });
+    if (url.pathname === '/api/admin/daily') return json({ hashes: {} });
     if (method === 'PUT') {
       if (url.pathname.endsWith('/manifest')) uploads.push(body);
       if (url.pathname.endsWith('/artifact')) uploadedParts.set(Number(url.searchParams.get('part')), Buffer.from(init!.body as Uint8Array));

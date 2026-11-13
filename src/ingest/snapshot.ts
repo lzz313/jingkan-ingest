@@ -196,7 +196,7 @@ export function buildFeedResponse(
   return {
     items,
     nextCursor:
-      items.length === query.limit && last ? encodeCursor(last) : null,
+      latest.length > query.limit && last ? encodeCursor(last) : null,
     counts,
     totals,
     lastUpdated: meta.lastUpdated,
