@@ -1,0 +1,55 @@
+{
+  "tweets": [
+    {
+      "id": "tech-twitter-1",
+      "x_post_id": "2120973994191094179",
+      "x_url": "https://x.com/i/status/2120973994191094179",
+      "headline": "Introducing Claude Meetings",
+      "summary": "Claude Meetings brings Claude into live calls where it builds documents and whiteboards while a team is still talking.",
+      "topics": [
+        "artificial intelligence",
+        "collaboration tools",
+        "productivity"
+      ],
+      "quality_score": 8,
+      "content_type": "tweet",
+      "posted_at": "2026-11-12T20:16:20+00:00",
+      "canonical_url": "https://www.techtwitter.com/tweet/tech-twitter-1"
+    },
+    {
+      "id": "tech-twitter-duplicate",
+      "x_post_id": "2121072773418340838",
+      "x_url": "https://x.com/i/status/2121072773418340838",
+      "headline": "Duplicate AI coding post",
+      "summary": "This should be removed in favour of the xbangdan record.",
+      "topics": ["artificial intelligence"],
+      "quality_score": 9,
+      "content_type": "tweet",
+      "posted_at": "2026-11-13T03:29:00+00:00"
+    },
+    {
+      "id": "tech-twitter-2",
+      "x_post_id": "2121084815101558804",
+      "x_url": "https://x.com/i/status/2121084815101558804",
+      "headline": "Gemini 4 Hydrogen Outscores Its Bigger Argon Model",
+      "summary": "Artificial Analysis puts Gemini 4 Hydrogen ahead of Argon and highlights its lower input and output token pricing.",
+      "topics": ["artificial intelligence", "gemini", "software engineering"],
+      "quality_score": 10,
+      "content_type": "tweet",
+      "posted_at": "2026-11-13T03:36:42+00:00"
+    },
+    {
+      "id": "tech-twitter-old",
+      "x_post_id": "2120000000000000000",
+      "x_url": "https://x.com/i/status/2120000000000000000",
+      "headline": "Old post",
+      "summary": "Outside the recent window.",
+      "topics": ["technology"],
+      "quality_score": 10,
+      "content_type": "tweet",
+      "posted_at": "2026-11-08T03:36:42+00:00"
+    }
+  ],
+  "total": 4,
+  "hasMore": false
+}

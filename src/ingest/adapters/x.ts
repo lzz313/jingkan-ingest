@@ -3,10 +3,11 @@ import type { CorePost, ItemMetrics, NormalizedItem, SourceId } from '../../shar
 import { firstSentences, hashText, stripHtml } from '../../shared/html';
 import { parseMetricNumber, snowflakeToMs } from '../../shared/numbers';
 import { fetchJson, fetchText } from '../fetch';
+import { fetchTechTwitterX } from './x-tech-twitter';
 
 const POSTS_URL = 'https://xbangdan.com/posts/';
 const HOT_URL = 'https://xbangdan.com/hot.json';
-const MAX_ITEMS = 30;
+const MAX_XBANGDAN_ITEMS = 20;
 
 interface HotEntry {
   id?: string;
@@ -225,6 +226,9 @@ function toItem(candidate: Candidate, now: number): NormalizedItem | null {
     metrics,
     images: [],
     extra: {
+      provider: 'xbangdan',
+      providerLabel: 'X 榜单',
+      providerUrl: 'https://xbangdan.com/posts/',
       category,
       categories: candidate.category?.split(/\s+/).filter(Boolean) ?? [category],
       sourceCategory: 'ai_coding',
@@ -255,15 +259,18 @@ export async function fetchX(now = Date.now()): Promise<NormalizedItem[]> {
     addHotEntries(candidates, hotResult.value);
   }
 
-  if (postsResult.status === 'rejected' && hotResult.status === 'rejected') {
+  const xbangdanFailed =
+    postsResult.status === 'rejected' && hotResult.status === 'rejected';
+  let xbangdanError = '';
+  if (xbangdanFailed) {
     const postsError =
       postsResult.reason instanceof Error ? postsResult.reason.message : String(postsResult.reason);
     const hotError =
       hotResult.reason instanceof Error ? hotResult.reason.message : String(hotResult.reason);
-    throw new Error(`xbangdan posts and hot.json both failed: ${postsError}; ${hotError}`);
+    xbangdanError = `xbangdan posts and hot.json both failed: ${postsError}; ${hotError}`;
   }
 
-  const items = [...candidates.values()]
+  const xbangdanItems = [...candidates.values()]
     .sort(
       (left, right) =>
         (right.views ?? 0) - (left.views ?? 0) ||
@@ -272,10 +279,33 @@ export async function fetchX(now = Date.now()): Promise<NormalizedItem[]> {
     )
     .map((candidate) => toItem(candidate, now))
     .filter((item): item is NormalizedItem => item !== null)
-    .slice(0, MAX_ITEMS);
+    .slice(0, MAX_XBANGDAN_ITEMS);
+
+  let techTwitterItems: NormalizedItem[] = [];
+  let techTwitterError = '';
+  try {
+    techTwitterItems = await fetchTechTwitterX(
+      now,
+      new Set(xbangdanItems.map((item) => item.externalId)),
+    );
+  } catch (error) {
+    techTwitterError = error instanceof Error ? error.message : String(error);
+  }
+
+  const items = [...xbangdanItems, ...techTwitterItems].sort(
+    (left, right) => right.publishedAt - left.publishedAt,
+  );
 
   if (items.length === 0) {
-    throw new Error('xbangdan returned no AI coding posts');
+    const details = [
+      xbangdanFailed ? xbangdanError : '',
+      techTwitterError ? `Tech Twitter failed: ${techTwitterError}` : '',
+    ]
+      .filter(Boolean)
+      .join('; ');
+    throw new Error(
+      `X providers returned no usable posts${details ? `: ${details}` : ''}`,
+    );
   }
   return items;
 }

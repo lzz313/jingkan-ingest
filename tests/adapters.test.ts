@@ -320,21 +320,37 @@ describe('GitHub Trending adapter', () => {
 });
 
 describe('X adapter', () => {
-  it('merges xbangdan boards, keeps AI coding posts and uses exact metrics', async () => {
+  it('combines xbangdan and Tech Twitter while deduplicating status IDs', async () => {
     stubFetch([
       { match: 'xbangdan.com/posts/', file: 'xbangdan-posts.html', type: 'text/html' },
       { match: 'xbangdan.com/hot.json', file: 'xbangdan-hot.json', type: 'application/json' },
+      {
+        match: 'techtwitter.com/api/tweets/trending',
+        file: 'techtwitter-trending.json',
+        type: 'application/json',
+      },
+      {
+        match: 'tweet-result?id=2120973994191094179',
+        file: 'techtwitter-tweet.json',
+        type: 'application/json',
+      },
     ]);
     const now = Date.UTC(2026, 10, 13, 20, 0);
     const items = await fetchX(now);
 
-    expect(items).toHaveLength(2);
-    expect(items.every((item) => item.extra?.category === 'AI 编程')).toBe(true);
+    expect(items).toHaveLength(4);
+    expect(new Set(items.map((item) => item.externalId)).size).toBe(4);
     expect(items.some((item) => item.externalId === '2121044759062159705')).toBe(false);
 
-    const first = items[0]!;
+    const xbangdan = items.filter((item) => item.extra?.provider === 'xbangdan');
+    expect(xbangdan).toHaveLength(2);
+    expect(xbangdan.every((item) => item.extra?.category === 'AI 编程')).toBe(true);
+    expect(xbangdan.every((item) => item.extra?.providerLabel === 'X 榜单')).toBe(true);
+
+    const first = xbangdan.find(
+      (item) => item.externalId === '2121072773418340838',
+    )!;
     expect(first.source).toBe('x');
-    expect(first.externalId).toBe('2121072773418340838');
     expect(first.title).toMatch(/miniMax H3/i);
     expect(first.url).toBe(
       'https://x.com/shangdu2005/status/2121072773418340838',
@@ -354,11 +370,40 @@ describe('X adapter', () => {
     });
     expect(first.publishedAt).toBeGreaterThan(Date.UTC(2026, 0, 1));
     expect(first.publishedAt).toBeLessThan(now);
+
+    const tech = items.filter((item) => item.extra?.provider === 'tech-twitter');
+    expect(tech).toHaveLength(2);
+    expect(tech.every((item) => item.extra?.providerLabel === 'Tech Twitter')).toBe(true);
+
+    const enriched = tech.find((item) => item.externalId === '2120973994191094179')!;
+    expect(enriched.title).toBe('Introducing Claude Meetings');
+    expect(enriched.body).toContain('builds docs');
+    expect(enriched.url).toBe(
+      'https://x.com/claudeai/status/2120973994191094179',
+    );
+    expect(enriched.metrics).toMatchObject({
+      likes: 55590,
+      replies: 1516,
+      qualityScore: 8,
+    });
+    expect(enriched.images?.some((url) => url.includes('HW82tOPWUAAsEFY'))).toBe(true);
+    expect(enriched.extra?.topics).toContain('artificial intelligence');
+
+    const fallback = tech.find((item) => item.externalId === '2121084815101558804')!;
+    expect(fallback.title).toContain('Gemini 4 Hydrogen');
+    expect(fallback.body).toContain('Artificial Analysis');
+    expect(fallback.metrics).toEqual({ qualityScore: 10 });
+    expect(fallback.extra?.statsSource).toBe('tech-twitter');
   });
 
   it('falls back to the server-rendered board when hot.json is unavailable', async () => {
     stubFetch([
       { match: 'xbangdan.com/posts/', file: 'xbangdan-posts.html', type: 'text/html' },
+      {
+        match: 'techtwitter.com/api/tweets/trending',
+        file: 'techtwitter-empty.json',
+        type: 'application/json',
+      },
     ]);
     const items = await fetchX(Date.UTC(2026, 10, 13, 20, 0));
     expect(items).toHaveLength(2);
@@ -367,10 +412,40 @@ describe('X adapter', () => {
     expect(items[0]!.metrics?.views).toBeUndefined();
   });
 
-  it('rejects when both public boards are unavailable', async () => {
+  it('keeps Tech Twitter available when both xbangdan boards fail', async () => {
+    stubFetch([
+      {
+        match: 'techtwitter.com/api/tweets/trending',
+        file: 'techtwitter-trending.json',
+        type: 'application/json',
+      },
+      {
+        match: 'tweet-result?id=2120973994191094179',
+        file: 'techtwitter-tweet.json',
+        type: 'application/json',
+      },
+    ]);
+    const items = await fetchX(Date.UTC(2026, 10, 13, 20, 0));
+    expect(items).toHaveLength(3);
+    expect(items.every((item) => item.source === 'x')).toBe(true);
+    expect(items.every((item) => item.extra?.provider === 'tech-twitter')).toBe(true);
+  });
+
+  it('keeps X 榜单 available when Tech Twitter fails', async () => {
+    stubFetch([
+      { match: 'xbangdan.com/posts/', file: 'xbangdan-posts.html', type: 'text/html' },
+      { match: 'xbangdan.com/hot.json', file: 'xbangdan-hot.json', type: 'application/json' },
+    ]);
+    const items = await fetchX(Date.UTC(2026, 10, 13, 20, 0));
+    expect(items).toHaveLength(2);
+    expect(items.every((item) => item.source === 'x')).toBe(true);
+    expect(items.every((item) => item.extra?.provider === 'xbangdan')).toBe(true);
+  });
+
+  it('rejects when both X providers are unavailable', async () => {
     stubFetch([]);
     await expect(fetchX()).rejects.toThrow(
-      'xbangdan posts and hot.json both failed',
+      'X providers returned no usable posts',
     );
   });
 });

@@ -1,0 +1,17 @@
+{
+  "__typename": "Tweet",
+  "favorite_count": 55590,
+  "created_at": "2026-11-12T20:16:20.000Z",
+  "id_str": "2120973994191094179",
+  "text": "Introducing Claude Meetings: add Claude to your team's video call and it builds docs, whiteboards, and other artifacts with you while you're still talking.",
+  "conversation_count": 1516,
+  "user": {
+    "name": "Claude",
+    "screen_name": "claudeai"
+  },
+  "photos": [],
+  "mediaDetails": [],
+  "video": {
+    "poster": "https://pbs.twimg.com/media/HW82tOPWUAAsEFY.jpg"
+  }
+}

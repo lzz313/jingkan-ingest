@@ -4,7 +4,7 @@
 
 ## 抓取来源
 
-- X（公开榜单 `xbangdan.com`，只收录 `ai_coding` 内容）
+- X（`X 榜单` 收录 xbangdan 的 `ai_coding` 内容，`Tech Twitter` 补充近期 AI / 开发趋势）
 - V2EX
 - NodeSeek
 - LINUX DO
@@ -18,6 +18,10 @@
 
 新增的 AI 与产品来源只回填最近 48 小时内容。Hugging Face 使用赞同 / 评论参与热点；
 Simon Willison、Google AI 和 Product Hunt 没有可靠的互动指标，因此只进入最新视图。
+
+X 在页面上仍是一个频道，内部由两个公开入口互补：`X 榜单` 优先提供中文 AI 编程热榜与曝光数据；
+`Tech Twitter` 补充最近 48 小时的英文 AI、开发工具和创业讨论，并通过 X syndication
+补齐原帖、作者、点赞、回复和媒体。两路按 X 状态 ID 去重；任一入口失败时，另一入口仍会继续入库。
 
 ## 定时安排
 
