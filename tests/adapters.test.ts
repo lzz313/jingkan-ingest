@@ -90,6 +90,17 @@ describe('NodeSeek adapter', () => {
     expect(items[0]!.extra?.statsSource).toBe('translate-listing');
     expect(items[2]!.metrics).toEqual({});
   });
+
+  it('drops trade, carpool, archive, and invite-code posts', async () => {
+    stubFetch([
+      { match: 'rss.nodeseek.com', file: 'nodeseek-skip.xml', type: 'application/rss+xml' },
+      { match: 'translate.goog', file: 'nodeseek-listing.html', type: 'text/html' },
+    ]);
+    const items = await fetchNodeseek();
+    expect(items.map((item) => item.externalId)).toEqual(['1']);
+    expect(items[0]!.extra?.category).toBe('daily');
+    expect(items[0]!.author).toBe('TopSpin');
+  });
 });
 
 describe('LINUX DO adapter', () => {

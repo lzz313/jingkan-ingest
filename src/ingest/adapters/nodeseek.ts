@@ -1,6 +1,6 @@
 import type { NormalizedItem } from '../../shared/types';
 import { extractImages, firstSentences, hashText, stripHtml } from '../../shared/html';
-import { parseNodeSeekListing, type NodeSeekStats } from '../../shared/nodeseek';
+import { parseNodeSeekListing, shouldSkipNodeSeekPost, type NodeSeekStats } from '../../shared/nodeseek';
 import { fetchText } from '../fetch';
 import { parseRss, parseRssDate } from '../rss';
 
@@ -37,6 +37,10 @@ export async function fetchNodeseek(): Promise<NormalizedItem[]> {
   const [xml, stats] = await Promise.all([fetchText(RSS_URL), fetchListingStats()]);
   return parseRss(xml)
     .filter((item) => item.title && item.link)
+    // Trade/carpool listings, test archives, and invite-code posts are not
+    // reading material: drop them before they enter state. The Worker fallback
+    // and the shared spam policy apply the same rule.
+    .filter((item) => !shouldSkipNodeSeekPost({ title: item.title, category: item.categories[0] }))
     .map((item) => {
       const externalId =
         item.guid || item.link.match(/post-(\d+)/)?.[1] || item.link;

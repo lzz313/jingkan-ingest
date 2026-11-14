@@ -1,4 +1,8 @@
+import { SOURCES } from './sources';
+import type { SourceId } from './types';
+
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+const AUTHOR_MAX = 20;
 
 export function pad2(value: number): string {
   return String(value).padStart(2, '0');
@@ -61,6 +65,31 @@ export function dayLabel(timestamp: number, now = Date.now()): string {
 
 export function isSameLocalDay(a: number, b: number): boolean {
   return formatDayKey(a) === formatDayKey(b);
+}
+
+/**
+ * Community RSS creators can carry a profile signature after the display name
+ * (LINUX DO uses a full-width colon). Cards show the name only, and long names
+ * are capped so one reader cannot push the whole meta row wide.
+ */
+export function truncateAuthor(name: string, max = AUTHOR_MAX): string {
+  const text = name.trim();
+  const signature = text.indexOf('：');
+  const base = (signature > 0 ? text.slice(0, signature) : text).trim();
+  const chars = Array.from(base);
+  return chars.length > max ? `${chars.slice(0, max).join('')}…` : chars.join('');
+}
+
+/** The author line shared by the card, its SSR markup, and the daily digest. */
+export function formatAuthor(
+  source: SourceId,
+  author?: string | null,
+  handle?: string | null,
+): string {
+  const raw = source === 'x'
+    ? `@${handle?.trim() || author?.trim() || 'unknown'}`
+    : author?.trim() || SOURCES[source].name;
+  return truncateAuthor(raw);
 }
 
 export interface DayGroup<T> {

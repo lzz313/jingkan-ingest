@@ -3,6 +3,7 @@ import { extractImages, firstSentences, hashText, stripHtml } from '../src/share
 import { formatCompactNumber, parseMetricNumber, snowflakeToMs } from '../src/shared/numbers';
 import { computeHot } from '../src/shared/scoring';
 import { shouldHideItem } from '../src/shared/spam';
+import { shouldSkipNodeSeekPost } from '../src/shared/nodeseek';
 import { normalizeItem } from '../src/shared/normalize';
 import { dayLabel, groupByLocalDay } from '../src/shared/format';
 
@@ -89,6 +90,47 @@ describe('spam filter', () => {
         url: 'https://example.com',
       }),
     ).toBe(false);
+  });
+
+  it('hides NodeSeek marketplace, archive, and invite-code posts', () => {
+    for (const [title, category] of [
+      ['【收】币安实时汇率收100U', 'trade'],
+      ['人找车，gemini ultra 5x 20x均可', 'carpool'],
+      ['(NQ) 留档 blossomhost 德克萨斯', 'daily'],
+      ['Muse 邀请码 & 机器人链接', 'daily'],
+      ['剩余+340出 斯巴达 Spartanhost 西雅图', 'daily'],
+    ] as const) {
+      expect(shouldHideItem({ source: 'nodeseek', title, extra: { category }, url: 'https://www.nodeseek.com/' })).toBe(true);
+    }
+    expect(
+      shouldHideItem({ source: 'nodeseek', title: '今晚的 po0 是怎么了？', extra: { category: 'daily' }, url: 'https://www.nodeseek.com/' }),
+    ).toBe(false);
+  });
+});
+
+describe('NodeSeek post policy', () => {
+  it('drops trade and carpool nodes', () => {
+    expect(shouldSkipNodeSeekPost({ title: '随便什么标题', category: 'trade' })).toBe(true);
+    expect(shouldSkipNodeSeekPost({ title: '人找车', category: 'CARPOOL' })).toBe(true);
+  });
+
+  it('drops test archives, invite codes, and misplaced sales titles', () => {
+    for (const title of [
+      '(NQ) 留档 blossomhost 测试',
+      'Muse 邀请码 & 机器人链接',
+      '【收】币安实时汇率收100U',
+      '[出] 50 出 年付 $4.8 V6VPS',
+      '+500收corona',
+      '剩余+340出 斯巴达 Spartanhost',
+    ]) {
+      expect(shouldSkipNodeSeekPost({ title, category: 'daily' })).toBe(true);
+    }
+  });
+
+  it('keeps ordinary posts', () => {
+    for (const title of ['今晚的 po0 是怎么了？', '老鸡晚高峰新测 TQ Lightlayer SJ-VP04-L', 'DMIT 行业资讯']) {
+      expect(shouldSkipNodeSeekPost({ title, category: 'daily' })).toBe(false);
+    }
   });
 });
 

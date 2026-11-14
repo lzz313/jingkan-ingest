@@ -11,6 +11,32 @@ function countFrom(text: string | undefined): number {
   return value && value > 0 ? Math.round(value) : 0;
 }
 
+/** NodeSeek nodes that are marketplaces rather than reading material. */
+const SKIP_NODESEEK_CATEGORIES = new Set(['trade', 'carpool']);
+/** Test/archive dumps and invite-code handouts. */
+const SKIP_NODESEEK_TITLE = /留档|邀请码/;
+/**
+ * Buy/sell titles that were filed under another node, e.g. `【收】…`,
+ * `[出] …`, `+500收corona`, `剩余+340出…`.
+ */
+const TRADE_NODESEEK_TITLE =
+  /【(?:剩余价值)?(?:收|出|售|求购|出售|转让)】|[[［](?:收|出)[\]］]|[+＋]\s*\d+(?:\.\d+)?\s*(?:收|出)|剩余[^，。！？\s]{0,12}[+＋]?\d+(?:\.\d+)?\s*出/;
+
+/**
+ * NodeSeek posts that are not reading material: trade/carpool listings,
+ * test/archive dumps, and invite-code posts. Shared by the ingest adapters and
+ * the Worker fallback so the same rule drops and hides them.
+ */
+export function shouldSkipNodeSeekPost(input: {
+  title?: string | null;
+  category?: string | null;
+}): boolean {
+  const category = (input.category ?? '').trim().toLowerCase();
+  if (SKIP_NODESEEK_CATEGORIES.has(category)) return true;
+  const title = (input.title ?? '').trim();
+  return SKIP_NODESEEK_TITLE.test(title) || TRADE_NODESEEK_TITLE.test(title);
+}
+
 /**
  * NodeSeek's own pages sit behind a Cloudflare challenge. Its public RSS feed
  * has no engagement data, but the Google-Translate mirror of the homepage

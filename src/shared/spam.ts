@@ -1,3 +1,4 @@
+import { shouldSkipNodeSeekPost } from './nodeseek';
 import type { ItemExtra, SourceId } from './types';
 
 const COMMUNITY_SOURCES: SourceId[] = ['v2ex', 'nodeseek', 'linuxdo'];
@@ -90,6 +91,9 @@ export function shouldHideItem(item: {
   if (!COMMUNITY_SOURCES.includes(item.source)) return false;
   // The source explicitly categorizes this node as promotion, regardless of technical keywords.
   if (item.source === 'v2ex' && (item.extra?.node?.trim().toLowerCase() === 'promotions' || item.extra?.nodeTitle?.trim() === '推广')) return true;
+  // Marketplace/test/invite-code posts are not reading material. This also
+  // hides records retained from before the adapter started dropping them.
+  if (item.source === 'nodeseek' && shouldSkipNodeSeekPost({ title: item.title, category: item.extra?.category })) return true;
   const text = `${item.title}\n${item.body ?? ''}`;
   const normalized = text.toLowerCase();
 
