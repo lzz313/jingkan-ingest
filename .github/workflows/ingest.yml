@@ -12,6 +12,14 @@ on:
         description: Maximum titles to translate, including repair of old untranslated results
         type: number
         default: 60
+      dedupe_dry_run:
+        description: Log NodeSeek duplicate candidates without hiding them
+        type: boolean
+        default: false
+      dedupe_reset:
+        description: Clear all NodeSeek duplicate markers once
+        type: boolean
+        default: false
 concurrency:
   group: jingkan-publisher
   cancel-in-progress: false
@@ -37,4 +45,15 @@ jobs:
           PREWARM_TRANSLATIONS: ${{ vars.PREWARM_TRANSLATIONS || '1' }}
           TITLE_TRANSLATION_LIMIT: ${{ inputs.translation_limit || '60' }}
           FORCE_FETCH: ${{ github.event_name == 'workflow_dispatch' && inputs.force_fetch && '1' || '0' }}
+          NODESEEK_DEDUPE: ${{ vars.NODESEEK_DEDUPE || '0' }}
+          NODESEEK_DEDUPE_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dedupe_dry_run && '1' || vars.NODESEEK_DEDUPE_DRY_RUN || '0' }}
+          NODESEEK_DEDUPE_RESET: ${{ github.event_name == 'workflow_dispatch' && inputs.dedupe_reset && '1' || '0' }}
+          NODESEEK_DEDUPE_WINDOW_DAYS: ${{ vars.NODESEEK_DEDUPE_WINDOW_DAYS || '7' }}
+          NODESEEK_DEDUPE_MAX_CHECKS: ${{ vars.NODESEEK_DEDUPE_MAX_CHECKS || '20' }}
+          NODESEEK_DEDUPE_MAX_CANDIDATES: ${{ vars.NODESEEK_DEDUPE_MAX_CANDIDATES || '5' }}
+          NODESEEK_DEDUPE_LEXICAL: ${{ vars.NODESEEK_DEDUPE_LEXICAL || '0.18' }}
+          NODESEEK_DEDUPE_COSINE: ${{ vars.NODESEEK_DEDUPE_COSINE || '0.82' }}
+          NODESEEK_DEDUPE_TEXT_CHARS: ${{ vars.NODESEEK_DEDUPE_TEXT_CHARS || '500' }}
+          NODESEEK_DEDUPE_MAX_TEXTS: ${{ vars.NODESEEK_DEDUPE_MAX_TEXTS || '120' }}
+          NODESEEK_DEDUPE_TIMEOUT_MS: ${{ vars.NODESEEK_DEDUPE_TIMEOUT_MS || '20000' }}
         run: npm run ingest

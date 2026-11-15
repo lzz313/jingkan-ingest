@@ -6,16 +6,16 @@ import type { SnapshotManifest, SnapshotRange, SnapshotBuild } from './snapshot'
 export type BaseManifest = Omit<SnapshotManifest, 'artifacts' | 'canonicalParts'> & {
   artifacts?: SnapshotManifest['artifacts']; canonicalParts?: SnapshotRange[];
 };
-export async function call(config: IngestConfig, path: string, init: RequestInit = {}): Promise<Response> {
+export async function call(config: IngestConfig, path: string, init: RequestInit = {}, timeoutMs = 120_000): Promise<Response> {
   const response = await fetch(new URL(path, config.baseUrl), {
     ...init, headers: { authorization: `Bearer ${config.ingestToken}`, ...init.headers },
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) throw new Error(`Publisher request failed: HTTP ${response.status}: ${(await response.text()).slice(0, 500)}`);
   return response;
 }
-export async function post<T>(config: IngestConfig, path: string, body: unknown): Promise<T> {
-  return await (await call(config, path, { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' } })).json() as T;
+export async function post<T>(config: IngestConfig, path: string, body: unknown, timeoutMs = 120_000): Promise<T> {
+  return await (await call(config, path, { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }, timeoutMs)).json() as T;
 }
 export async function readBase(config: IngestConfig): Promise<BaseManifest> {
   return await (await call(config, '/api/admin/snapshot/base')).json() as BaseManifest;

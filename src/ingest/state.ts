@@ -8,13 +8,32 @@ import { MODERATE_SOURCES } from '../shared/moderate';
 import { sourceNeedsTitleTranslation } from '../shared/sources';
 import { contentExtra } from '../shared/content-extra';
 
+/** Private evidence behind a duplicate verdict; never published to feed items. */
+export interface DedupeMarker {
+  /** The item contentHash that was checked. */
+  hash: string | null;
+  /** Fingerprint of every setting that can change the verdict. */
+  config: string;
+  checkedAt: number;
+  model?: string;
+  /** Best lexical candidate, kept for debugging. */
+  candidateId?: string;
+  lexical?: number;
+  cosine?: number;
+  /** The canonical's contentHash when the duplicate was marked. */
+  canonicalHash?: string | null;
+}
 export interface StoredItem {
   item: FeedItem;
   observedAt: number;
   ruleHidden: boolean;
   moderation: 'keep' | 'hide' | 'pending';
   aiReason?: string;
+  /** Earliest post this record duplicates; hidden while it points at one. */
+  duplicateOf?: string;
+  dedupe?: DedupeMarker;
 }
+export const STATE_RETENTION_MS = 35 * 86400000;
 export interface GeneratorState {
   records: Map<string, StoredItem>;
   sources: Partial<Record<SourceId, SourceStatus>>;
@@ -69,6 +88,8 @@ export function mergeItems(state: GeneratorState, inputs: NormalizedItem[], now:
       state.records.set(id, { item: next, ruleHidden: hidden, observedAt: now,
         moderation: edited ? moderated(next.source) ? 'pending' : 'keep' : old!.moderation,
         ...(!edited && old?.aiReason ? { aiReason: old.aiReason } : {}),
+        ...(!edited && old?.duplicateOf ? { duplicateOf: old.duplicateOf } : {}),
+        ...(!edited && old?.dedupe ? { dedupe: old.dedupe } : {}),
       });
       changes++;
     } else {
@@ -141,10 +162,54 @@ export function pruneState(state: GeneratorState, cutoff: number): void {
   for (const [id, record] of state.records) if (record.item.publishedAt < cutoff) state.records.delete(id);
 }
 export function visibleItems(state: GeneratorState): FeedItem[] {
-  return [...state.records.values()].filter((record) => !record.ruleHidden && record.moderation === 'keep').map((record) => ({ ...record.item, hidden: false }));
+  return [...state.records.values()]
+    .filter((record) => !record.ruleHidden && record.moderation === 'keep' && !record.duplicateOf)
+    .map((record) => ({ ...record.item, hidden: false }));
 }
 export function removedItems(state: GeneratorState): Record<string, number> {
-  return Object.fromEntries([...state.records.values()].filter((record) => record.ruleHidden || record.moderation === 'hide').map((record) => [record.item.id, record.item.publishedAt]));
+  return Object.fromEntries([...state.records.values()]
+    .filter((record) => record.ruleHidden || record.moderation === 'hide' || record.duplicateOf)
+    .map((record) => [record.item.id, record.item.publishedAt]));
+}
+/** Records that may consume moderation or translation budget. */
+export function enrichmentRecords(state: GeneratorState): StoredItem[] {
+  return [...state.records.values()].filter((record) => !record.ruleHidden && !record.duplicateOf);
+}
+/**
+ * Release pointers whose canonical stopped being a valid root. A pruned
+ * canonical is deliberately kept: the duplicate ages out with it, and clearing
+ * the pointer would resurrect an old post into the feed.
+ */
+export function reconcileDuplicatePointers(state: GeneratorState): number {
+  let cleared = 0;
+  for (const record of state.records.values()) {
+    if (!record.duplicateOf) continue;
+    const canonical = state.records.get(record.duplicateOf);
+    if (!canonical) continue;
+    const canonicalEdited = record.dedupe?.canonicalHash !== undefined &&
+      record.dedupe.canonicalHash !== canonical.item.contentHash;
+    if (canonical.ruleHidden || canonical.moderation === 'hide' || canonicalEdited) {
+      delete record.duplicateOf;
+      delete record.dedupe;
+      cleared++;
+    }
+  }
+  return cleared;
+}
+/**
+ * Merge removals with the new snapshot, dropping entries for records that are
+ * visible again and entries past retention. Records that disappeared from
+ * state stay removed until their timestamp ages out.
+ */
+export function reconcileRemovedMap(base: Record<string, number>, state: GeneratorState, now: number): Record<string, number> {
+  const removed = { ...base, ...removedItems(state) };
+  const cutoff = now - STATE_RETENTION_MS;
+  for (const [id, timestamp] of Object.entries(removed)) {
+    if (timestamp < cutoff) { delete removed[id]; continue; }
+    const record = state.records.get(id);
+    if (record && !record.ruleHidden && record.moderation === 'keep' && !record.duplicateOf) delete removed[id];
+  }
+  return removed;
 }
 /** Minutes since midnight in Beijing, independent of the runner's time zone. */
 function beijingMinutes(timestamp: number): number {

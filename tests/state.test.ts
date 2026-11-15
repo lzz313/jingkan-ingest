@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyEvent, bootstrapRecords, reconcileState, deduplicateStateImages, mergeItems, pruneState, removedItems, updateSources, visibleItems, isSourceWindow, type GeneratorState } from '../src/ingest/state';
+import { applyEvent, bootstrapRecords, enrichmentRecords, reconcileDuplicatePointers, reconcileRemovedMap, reconcileState, deduplicateStateImages, mergeItems, pruneState, removedItems, updateSources, visibleItems, isSourceWindow, STATE_RETENTION_MS, type GeneratorState, type StoredItem } from '../src/ingest/state';
 import type { NormalizedItem, FeedItem } from '../src/shared/types';
 const now = Date.UTC(2026, 10, 13, 2);
 function state(): GeneratorState { return { records: new Map(), sources: {}, lastUpdated: 0, lastRefreshAt: 0, lastIngestAttemptAt: 0 }; }
@@ -148,4 +148,89 @@ it('repairs retained image variants without changing timestamps or content hashe
   expect(record.item.images).toEqual([original]);
   expect({ fetchedAt: record.item.fetchedAt, contentHash: record.item.contentHash, observedAt: record.observedAt, lastUpdated: s.lastUpdated }).toEqual(before);
   expect(deduplicateStateImages(s)).toBe(0);
+});
+
+describe('duplicate pointers', () => {
+  function pointerState(): { state: GeneratorState; canonical: StoredItem; duplicate: StoredItem } {
+    const s = state();
+    mergeItems(s, [post({ source: 'nodeseek' }), post({ source: 'nodeseek', externalId: '2' })], now);
+    const canonical = s.records.get('nodeseek:1')!;
+    const duplicate = s.records.get('nodeseek:2')!;
+    duplicate.duplicateOf = 'nodeseek:1';
+    duplicate.dedupe = { hash: duplicate.item.contentHash, config: 'fp', checkedAt: now, canonicalHash: canonical.item.contentHash };
+    return { state: s, canonical, duplicate };
+  }
+
+  it('hides duplicates from feed and enrichment while reporting them as removed', () => {
+    const { state: s, canonical, duplicate } = pointerState();
+    canonical.moderation = 'keep';
+    duplicate.moderation = 'keep';
+    expect(visibleItems(s).map((item) => item.id)).toEqual(['nodeseek:1']);
+    expect(removedItems(s)).toEqual({ 'nodeseek:2': duplicate.item.publishedAt });
+    expect(enrichmentRecords(s).map((record) => record.item.id)).toEqual(['nodeseek:1']);
+  });
+
+  it('keeps pointers through metric refreshes and clears them when the post is edited', () => {
+    const { state: s } = pointerState();
+    mergeItems(s, [post({ source: 'nodeseek', externalId: '2' })], now + 3600000);
+    expect(s.records.get('nodeseek:2')!.duplicateOf).toBe('nodeseek:1');
+    expect(s.records.get('nodeseek:2')!.dedupe?.config).toBe('fp');
+    mergeItems(s, [post({ source: 'nodeseek', externalId: '2', title: 'Rewritten topic' })], now + 7200000);
+    expect(s.records.get('nodeseek:2')!.duplicateOf).toBeUndefined();
+    expect(s.records.get('nodeseek:2')!.dedupe).toBeUndefined();
+  });
+
+  it('keeps pointers through pending or chained canonicals', () => {
+    const pending = pointerState();
+    pending.canonical.moderation = 'pending';
+    expect(reconcileDuplicatePointers(pending.state)).toBe(0);
+    expect(pending.duplicate.duplicateOf).toBe('nodeseek:1');
+
+    const chained = pointerState();
+    chained.canonical.duplicateOf = 'nodeseek:0';
+    expect(reconcileDuplicatePointers(chained.state)).toBe(0);
+    expect(chained.duplicate.duplicateOf).toBe('nodeseek:1');
+  });
+
+  it('keeps a pointer whose canonical was pruned so old posts never resurface', () => {
+    const { state: s, duplicate } = pointerState();
+    s.records.delete('nodeseek:1');
+    expect(reconcileDuplicatePointers(s)).toBe(0);
+    expect(duplicate.duplicateOf).toBe('nodeseek:1');
+  });
+
+  it('releases pointers when the canonical is hidden or rewritten', () => {
+    const mutations: Array<(canonical: StoredItem) => void> = [
+      (canonical) => { canonical.ruleHidden = true; },
+      (canonical) => { canonical.moderation = 'hide'; },
+      (canonical) => { canonical.item.contentHash = 'rewritten'; },
+    ];
+    for (const mutate of mutations) {
+      const { state: s, canonical, duplicate } = pointerState();
+      mutate(canonical);
+      expect(reconcileDuplicatePointers(s)).toBe(1);
+      expect(duplicate.duplicateOf).toBeUndefined();
+      expect(duplicate.dedupe).toBeUndefined();
+    }
+  });
+
+  it('rebuilds the removed map without resurrecting pending or pruned records', () => {
+    const s = state();
+    mergeItems(s, [post({ source: 'nodeseek' }), post({ source: 'nodeseek', externalId: '2' }), post({ source: 'nodeseek', externalId: '3' })], now);
+    s.records.get('nodeseek:1')!.moderation = 'keep';
+    s.records.get('nodeseek:2')!.moderation = 'keep';
+    s.records.get('nodeseek:2')!.duplicateOf = 'nodeseek:1';
+    const removed = reconcileRemovedMap({
+      'nodeseek:1': now - 1000,
+      'nodeseek:2': now - 1000,
+      'nodeseek:3': now - 1000,
+      'gone:1': now - 1000,
+      'gone:old': now - STATE_RETENTION_MS - 1,
+    }, s, now);
+    expect(removed).not.toHaveProperty('nodeseek:1');
+    expect(removed).toHaveProperty('nodeseek:2');
+    expect(removed).toHaveProperty('nodeseek:3');
+    expect(removed).toHaveProperty('gone:1');
+    expect(removed).not.toHaveProperty('gone:old');
+  });
 });

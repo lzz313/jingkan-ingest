@@ -6,8 +6,9 @@ import { call, post, readBase, readBaseItems, readBaseRecords, uploadSnapshot } 
 import { buildSnapshot } from './snapshot';
 import { fetchSources } from './sources';
 import { publishDailyDigests } from './daily';
-import { applyEvent, bootstrapRecords, isSourceWindow, mergeItems, deduplicateStateImages, reconcileState, pruneState, removedItems, updateSources, visibleItems,
+import { applyEvent, bootstrapRecords, enrichmentRecords, isSourceWindow, mergeItems, deduplicateStateImages, pruneState, reconcileDuplicatePointers, reconcileRemovedMap, reconcileState, updateSources, visibleItems, STATE_RETENTION_MS,
   type EnrichmentEntry, type GeneratorState, type InputEvent, type StoredItem } from './state';
+import { runNodeSeekDedupe } from './dedupe';
 
 interface LeaseState { lease: { token: string; expiresAt: number }; lastRefreshAt: number }
 export interface PublishOptions { repackOnly?: boolean; forceFetch?: boolean; translationLimit?: number }
@@ -45,7 +46,7 @@ export function selectBacklog(items: FeedItem[], limit: number): FeedItem[] {
   return selected;
 }
 async function enrich(config: IngestConfig, state: GeneratorState, translationLimit = 60): Promise<void> {
-  const records = [...state.records.values()].filter((record) => !record.ruleHidden).sort((a, b) => b.item.publishedAt - a.item.publishedAt);
+  const records = enrichmentRecords(state).sort((a, b) => b.item.publishedAt - a.item.publishedAt);
   const pending = selectBacklog(records.filter((record) => record.moderation === 'pending').map((r) => r.item), 60);
   for (let offset = 0; offset < pending.length; offset += 20) {
     try {
@@ -108,19 +109,26 @@ export async function runPublisher(config: IngestConfig, options: PublishOptions
     const imageRepairs = deduplicateStateImages(state);
     if (imageRepairs) console.log(`[publish] deduplicated images in ${imageRepairs} records`);
     if (!options.repackOnly) {
-      pruneState(state, now - 35 * 86400000);
+      pruneState(state, now - STATE_RETENTION_MS);
       console.log('[publish] policy reconciliation:', JSON.stringify(reconcileState(state)));
+      const released = reconcileDuplicatePointers(state);
+      if (released) console.log(`[publish] released ${released} stale duplicate pointers`);
+      try {
+        const dedupe = await runNodeSeekDedupe(config, state, now);
+        if (dedupe.reset) console.log('[publish] duplicate markers reset');
+        else if (dedupe.checked) console.log(`[publish] dedupe checked ${dedupe.checked}, ${dedupe.dryRun ? 'would hide' : 'hid'} ${dedupe.duplicates}, deferred ${dedupe.skipped}`);
+      } catch (error) { console.warn('[publish] dedupe deferred:', String(error)); }
       await enrich(config, state, options.translationLimit);
+      // Moderation may hide a canonical, so release its duplicates before the snapshot is built.
+      const afterModeration = reconcileDuplicatePointers(state);
+      if (afterModeration) console.log(`[publish] released ${afterModeration} duplicates after moderation`);
     }
     const items = visibleItems(state);
     const built = buildSnapshot(items, {
       dataVersion: base.dataVersion + 1, lastUpdated: state.lastUpdated, lastRefreshAt: state.lastRefreshAt,
       lastIngestAttemptAt: state.lastIngestAttemptAt, sources: state.sources,
-      removed: { ...base.removed, ...removedItems(state) }, processedEvents: events.map((event) => event.key),
+      removed: reconcileRemovedMap(base.removed ?? {}, state, now), processedEvents: events.map((event) => event.key),
     }, Date.now(), undefined, [...state.records.values()]);
-    // Clear obsolete removals and restored records before uploading.
-    for (const item of items) delete built.manifest.removed![item.id];
-    for (const [id, timestamp] of Object.entries(built.manifest.removed!)) if (timestamp < now - 35 * 86400000) delete built.manifest.removed![id];
     await renewal;
     if (lostLease) throw new Error('Lease lost; refusing to publish');
     await post(config, '/api/admin/publisher', { action: 'renew', token });

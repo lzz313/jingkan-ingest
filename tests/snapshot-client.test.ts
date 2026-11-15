@@ -4,8 +4,9 @@ import { readBaseItems } from '../src/ingest/snapshot-client';
 import { runPublisher, selectBacklog } from '../src/ingest/publisher';
 import { fetchSources } from '../src/ingest/sources';
 import type { FeedItem } from '../src/shared/types';
+import { DEDUPE_DEFAULTS } from '../src/ingest/env';
 vi.mock('../src/ingest/sources', () => ({ fetchSources: vi.fn(async () => ({ items: [], sourceStatus: {} })) }));
-const config = { baseUrl: 'https://jing.show', ingestToken: 'test', prewarmTranslations: false };
+const config = { baseUrl: 'https://jing.show', ingestToken: 'test', prewarmTranslations: false, dedupe: DEDUPE_DEFAULTS };
 const post = (id: string): FeedItem => ({
   id, source: 'hn', externalId: id.split(':')[1]!, storyKey: null, title: id, titleZh: null,
   body: 'content', brief: null, briefZh: null, bodyZh: null, url: 'https://example.com/' + id,
@@ -15,12 +16,21 @@ const post = (id: string): FeedItem => ({
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 beforeEach(() => { vi.mocked(fetchSources).mockReset().mockResolvedValue({ items: [], sourceStatus: {} }); });
-function mockServer(options: { uploadFails?: boolean; conflict?: boolean; renewFails?: boolean; events?: boolean; corrupt?: boolean; imageVariants?: boolean } = {}) {
+function mockServer(options: { uploadFails?: boolean; conflict?: boolean; renewFails?: boolean; events?: boolean; corrupt?: boolean; imageVariants?: boolean; moderate?: boolean; dedupeState?: boolean } = {}) {
   const meta = { dataVersion: 1, lastUpdated: 100, lastRefreshAt: 0, sources: {} };
   const baseItem = post('hn:1');
   const originalImage = 'https://cdn3.ldstatic.com/original/4X/e/5/0/e501efabb23b73adbfd8e2eca3ff2f4532c1ac82.jpeg';
   if (options.imageVariants) baseItem.images = [originalImage.replace('/original/', '/optimized/').replace('.jpeg', '_2_287x500.jpeg'), originalImage];
-  const base = buildSnapshot([baseItem], meta);
+  const canonical = { ...post('nodeseek:1'), source: 'nodeseek' as const, title: 'Same topic', body: 'The original post.' };
+  const canonicalRecord = { item: canonical, observedAt: Date.now(), ruleHidden: false, moderation: 'keep' as const };
+  const duplicate = {
+    item: { ...post('nodeseek:2'), source: 'nodeseek' as const, title: 'Same topic', body: 'The reposted topic.', contentHash: 'duplicate-hash' },
+    observedAt: Date.now(), ruleHidden: false, moderation: 'keep' as const, duplicateOf: 'nodeseek:1',
+    dedupe: { hash: 'duplicate-hash', config: 'test-fingerprint', checkedAt: Date.now(), cosine: 1, canonicalHash: canonical.contentHash },
+  };
+  const base = options.dedupeState
+    ? buildSnapshot([canonical], meta, undefined, undefined, [canonicalRecord, duplicate])
+    : buildSnapshot([baseItem], meta);
   const uploadedParts = new Map<number, Buffer>();
   const paths: string[] = [], uploads: unknown[] = [];
   vi.stubGlobal('fetch', vi.fn(async (request: string | URL, init?: RequestInit) => {
@@ -50,7 +60,16 @@ function mockServer(options: { uploadFails?: boolean; conflict?: boolean; renewF
       expect(new Headers(init?.headers).get('x-expected-snapshot')).toBe(base.manifest.snapshotId);
       return json({ ok: !options.conflict }, options.conflict ? 409 : 200);
     }
-    if (url.pathname.endsWith('/enrich')) return json({ error: 'AI unavailable' }, 503);
+    if (url.pathname.endsWith('/embed')) {
+      const texts = body.texts as string[];
+      return json({ model: 'test-embed', dimensions: 8, embeddings: texts.map(() => [1, 0, 0, 0, 0, 0, 0, 0]) });
+    }
+    if (url.pathname.endsWith('/enrich')) {
+      if (options.moderate && body.kind === 'moderate') {
+        return json({ moderation: (body.items as FeedItem[]).map((item) => ({ id: item.id, contentHash: item.contentHash, hide: false, reason: null })) });
+      }
+      return json({ error: 'AI unavailable' }, 503);
+    }
     throw new Error('Unexpected request: ' + url.pathname);
   }));
   return { paths, uploads, base, uploadedParts, originalImage };
@@ -115,5 +134,46 @@ describe('single fenced R2 publisher', () => {
     vi.mocked(fetchSources).mockResolvedValue({ items: [{ source: 'v2ex', externalId: 'new', title: 'A useful question', url: 'https://v2ex.com/t/1', publishedAt: Date.now() }], sourceStatus: { v2ex: { ok: true, count: 1 } } });
     await runPublisher(config, { forceFetch: true });
     expect(uploads[0]).toMatchObject({ generatorStateParts: expect.any(Array), removed: {} });
+  });
+  it('hides a fetched NodeSeek duplicate from the public snapshot and records it in removed', async () => {
+    const { uploads, uploadedParts } = mockServer({ moderate: true });
+    const now = Date.now();
+    vi.mocked(fetchSources).mockResolvedValue({
+      items: [
+        { source: 'nodeseek', externalId: '1', title: 'Same topic', body: 'The original post.', url: 'https://www.nodeseek.com/post-1', publishedAt: now - 7200000 },
+        { source: 'nodeseek', externalId: '2', title: 'Same topic', body: 'The reposted topic.', url: 'https://www.nodeseek.com/post-2', publishedAt: now - 3600000 },
+      ],
+      sourceStatus: { nodeseek: { ok: true, count: 2 } },
+    });
+    await runPublisher({ ...config, dedupe: { ...DEDUPE_DEFAULTS, enabled: true } }, { forceFetch: true });
+
+    const manifest = uploads[0] as SnapshotManifest;
+    const read = (ranges: SnapshotManifest['canonicalParts']) => ranges.flatMap((range) => {
+      const part = manifest.artifacts.findIndex((artifact) => artifact.key === range.key);
+      return JSON.parse(uploadedParts.get(part)!.subarray(range.offset, range.offset + range.length).toString()) as Array<{ item?: FeedItem; id?: string; duplicateOf?: string; dedupe?: { model?: string } }>;
+    });
+    const publicItems = read(manifest.canonicalParts);
+    expect(publicItems.map((entry) => entry.id)).not.toContain('nodeseek:2');
+    expect(publicItems.map((entry) => entry.id)).toContain('nodeseek:1');
+    expect(manifest.removed).toHaveProperty('nodeseek:2');
+    expect(manifest.removed).not.toHaveProperty('nodeseek:1');
+    const records = read(manifest.generatorStateParts!);
+    const duplicate = records.find((record) => record.item?.id === 'nodeseek:2');
+    expect(duplicate?.duplicateOf).toBe('nodeseek:1');
+    expect(duplicate?.dedupe?.model).toBe('test-embed');
+  });
+  it('repacks duplicate markers without re-embedding', async () => {
+    const { paths, uploads, uploadedParts } = mockServer({ dedupeState: true });
+    await runPublisher(config, { repackOnly: true });
+
+    expect(paths.some((path) => path.endsWith('/embed'))).toBe(false);
+    const manifest = uploads[0] as SnapshotManifest;
+    const read = (ranges: SnapshotManifest['canonicalParts']) => ranges.flatMap((range) => {
+      const part = manifest.artifacts.findIndex((artifact) => artifact.key === range.key);
+      return JSON.parse(uploadedParts.get(part)!.subarray(range.offset, range.offset + range.length).toString()) as Array<{ item?: FeedItem; id?: string; duplicateOf?: string }>;
+    });
+    expect(read(manifest.canonicalParts).map((entry) => entry.id)).not.toContain('nodeseek:2');
+    expect(manifest.removed).toHaveProperty('nodeseek:2');
+    expect(read(manifest.generatorStateParts!).find((record) => record.item?.id === 'nodeseek:2')?.duplicateOf).toBe('nodeseek:1');
   });
 });

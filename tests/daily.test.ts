@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { buildDailyDigests, publishDailyDigests } from '../src/ingest/daily';
+import { DEDUPE_DEFAULTS } from '../src/ingest/env';
 import { isDailyDigest } from '../src/shared/daily';
 import { SOURCE_IDS, type FeedItem, type SourceId } from '../src/shared/types';
 
@@ -50,7 +51,7 @@ it('skips unchanged and completed archives and fences changed writes to the new 
     writes.push({ path: url.pathname, headers: new Headers(init.headers) });
     return new Response('{}');
   }));
-  expect(await publishDailyDigests({ baseUrl: 'https://jing.show', ingestToken: 'test', prewarmTranslations: false }, items, 'lease-token', 'new-snapshot')).toBe(1);
+  expect(await publishDailyDigests({ baseUrl: 'https://jing.show', ingestToken: 'test', prewarmTranslations: false, dedupe: DEDUPE_DEFAULTS }, items, 'lease-token', 'new-snapshot')).toBe(1);
   expect(writes[0]!.path).toBe('/api/admin/daily/2026-11-12');
   expect(writes[0]!.headers.get('x-publisher-lease')).toBe('lease-token');
   expect(writes[0]!.headers.get('x-expected-snapshot')).toBe('new-snapshot');
