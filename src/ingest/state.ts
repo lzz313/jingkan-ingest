@@ -151,15 +151,9 @@ function beijingMinutes(timestamp: number): number {
   const date = new Date(timestamp + 8 * 3600000);
   return date.getUTCHours() * 60 + date.getUTCMinutes();
 }
-/**
- * The quiet 06:00–08:00 window fetches once an hour; everywhere else the
- * normal ten-minute cadence applies.
- */
-export function sourceFetchInterval(timestamp: number): number {
-  const minutes = beijingMinutes(timestamp);
-  return minutes >= 360 && minutes < 480 ? 3600000 : 600000;
-}
 export function isSourceWindow(timestamp: number): boolean {
   const minutes = beijingMinutes(timestamp);
-  return [[360,480],[510,720],[750,760],[780,1080],[1110,1120],[1140,1420]].some(([start,end]) => minutes >= start! && minutes < end!);
+  // 06:00–08:00 only opens the top ten minutes of each hour: one fetch per
+  // hour there, while the rest of the day keeps the ten-minute cadence.
+  return [[360,370],[420,430],[510,720],[750,760],[780,1080],[1110,1120],[1140,1420]].some(([start,end]) => minutes >= start! && minutes < end!);
 }

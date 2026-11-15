@@ -6,7 +6,7 @@ import { call, post, readBase, readBaseItems, readBaseRecords, uploadSnapshot } 
 import { buildSnapshot } from './snapshot';
 import { fetchSources } from './sources';
 import { publishDailyDigests } from './daily';
-import { applyEvent, bootstrapRecords, isSourceWindow, sourceFetchInterval, mergeItems, deduplicateStateImages, reconcileState, pruneState, removedItems, updateSources, visibleItems,
+import { applyEvent, bootstrapRecords, isSourceWindow, mergeItems, deduplicateStateImages, reconcileState, pruneState, removedItems, updateSources, visibleItems,
   type EnrichmentEntry, type GeneratorState, type InputEvent, type StoredItem } from './state';
 
 interface LeaseState { lease: { token: string; expiresAt: number }; lastRefreshAt: number }
@@ -99,7 +99,7 @@ export async function runPublisher(config: IngestConfig, options: PublishOptions
     const events = options.repackOnly ? [] : await pendingEvents(config);
     for (const { event } of events) applyEvent(state, event);
     const now = Date.now();
-    const shouldFetch = !options.repackOnly && (options.forceFetch || claimed.lastRefreshAt > state.lastIngestAttemptAt || (isSourceWindow(now) && now - state.lastIngestAttemptAt >= sourceFetchInterval(now)));
+    const shouldFetch = !options.repackOnly && (options.forceFetch || claimed.lastRefreshAt > state.lastIngestAttemptAt || (isSourceWindow(now) && now - state.lastIngestAttemptAt >= 600000));
     if (shouldFetch) {
       state.lastIngestAttemptAt = now;
       const fetched = await fetchSources(now);

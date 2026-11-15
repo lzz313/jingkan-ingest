@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyEvent, bootstrapRecords, reconcileState, deduplicateStateImages, mergeItems, pruneState, removedItems, updateSources, visibleItems, isSourceWindow, sourceFetchInterval, type GeneratorState } from '../src/ingest/state';
+import { applyEvent, bootstrapRecords, reconcileState, deduplicateStateImages, mergeItems, pruneState, removedItems, updateSources, visibleItems, isSourceWindow, type GeneratorState } from '../src/ingest/state';
 import type { NormalizedItem, FeedItem } from '../src/shared/types';
 const now = Date.UTC(2026, 10, 13, 2);
 function state(): GeneratorState { return { records: new Map(), sources: {}, lastUpdated: 0, lastRefreshAt: 0, lastIngestAttemptAt: 0 }; }
@@ -101,16 +101,17 @@ describe('events, retention and source freshness', () => {
     expect(isSourceWindow(Date.UTC(2026, 10, 13, 4, 30))).toBe(true);
     expect(isSourceWindow(Date.UTC(2026, 10, 13, 16))).toBe(false);
   });
-  it('fetches hourly in the quiet 06:00–08:00 window', () => {
-    // Beijing 06:00–08:00 is UTC 22:00–00:00 the day before.
-    expect(isSourceWindow(Date.UTC(2026, 10, 12, 21, 59))).toBe(false);
-    expect(isSourceWindow(Date.UTC(2026, 10, 12, 22))).toBe(true);
-    expect(isSourceWindow(Date.UTC(2026, 10, 12, 23, 30))).toBe(true);
-    expect(isSourceWindow(Date.UTC(2026, 10, 13, 0))).toBe(false);
-    expect(sourceFetchInterval(Date.UTC(2026, 10, 12, 22, 30))).toBe(3_600_000);
-    expect(sourceFetchInterval(Date.UTC(2026, 10, 12, 23, 59))).toBe(3_600_000);
-    expect(sourceFetchInterval(Date.UTC(2026, 10, 13, 0))).toBe(600_000);
-    expect(sourceFetchInterval(Date.UTC(2026, 10, 13, 2))).toBe(600_000);
+  it('fetches once per hour in the quiet 06:00–08:00 window', () => {
+    // Beijing 06:00–08:00 opens only the first ten minutes of each hour.
+    expect(isSourceWindow(Date.UTC(2026, 10, 12, 21, 59))).toBe(false); // 05:59
+    expect(isSourceWindow(Date.UTC(2026, 10, 12, 22, 0))).toBe(true); // 06:00
+    expect(isSourceWindow(Date.UTC(2026, 10, 12, 22, 9))).toBe(true); // 06:09
+    expect(isSourceWindow(Date.UTC(2026, 10, 12, 22, 10))).toBe(false); // 06:10
+    expect(isSourceWindow(Date.UTC(2026, 10, 12, 22, 30))).toBe(false); // 06:30
+    expect(isSourceWindow(Date.UTC(2026, 10, 12, 23, 0))).toBe(true); // 07:00
+    expect(isSourceWindow(Date.UTC(2026, 10, 12, 23, 9))).toBe(true); // 07:09
+    expect(isSourceWindow(Date.UTC(2026, 10, 12, 23, 10))).toBe(false); // 07:10
+    expect(isSourceWindow(Date.UTC(2026, 10, 13, 0))).toBe(false); // 08:00
   });
 });
 
