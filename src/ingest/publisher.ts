@@ -6,9 +6,10 @@ import { call, post, readBase, readBaseItems, readBaseRecords, uploadSnapshot } 
 import { buildSnapshot } from './snapshot';
 import { fetchSources } from './sources';
 import { publishDailyDigests } from './daily';
-import { applyEvent, bootstrapRecords, enrichmentRecords, isSourceWindow, mergeItems, deduplicateStateImages, pruneState, reconcileDuplicatePointers, reconcileRemovedMap, reconcileState, updateSources, visibleItems, STATE_RETENTION_MS,
+import { applyEvent, bootstrapRecords, enrichmentRecords, isSourceWindow, mergeItems, deduplicateStateImages, pruneState, reconcileClusterPointers, reconcileDuplicatePointers, reconcileRemovedMap, reconcileState, updateSources, visibleItems, STATE_RETENTION_MS,
   type EnrichmentEntry, type GeneratorState, type InputEvent, type StoredItem } from './state';
 import { runNodeSeekDedupe } from './dedupe';
+import { runCrossSourceClusters } from './cluster';
 
 interface LeaseState { lease: { token: string; expiresAt: number }; lastRefreshAt: number }
 export interface PublishOptions { repackOnly?: boolean; forceFetch?: boolean; translationLimit?: number }
@@ -60,7 +61,11 @@ async function enrich(config: IngestConfig, state: GeneratorState, translationLi
     } catch (error) { console.warn('[publish] moderation pending:', String(error)); break; }
   }
   if (!config.prewarmTranslations) return;
-  const visible = records.filter((record) => record.moderation === 'keep').map((r) => r.item);
+  // Merged copies are not shown; skip their translation budget until they
+  // are released (a released copy is picked up again on the next run).
+  const visible = records
+    .filter((record) => record.moderation === 'keep' && !record.clusterOf)
+    .map((r) => r.item);
   const tasks: Array<{ field: TranslateField; items: FeedItem[] }> = [
     { field: 'title', items: selectBacklog(visible.filter((item) => itemNeedsTranslation(item, 'title')), translationLimit) },
     { field: 'brief', items: selectBacklog(visible.filter((item) => itemNeedsTranslation(item, 'brief')), 30) },
@@ -122,6 +127,15 @@ export async function runPublisher(config: IngestConfig, options: PublishOptions
       // Moderation may hide a canonical, so release its duplicates before the snapshot is built.
       const afterModeration = reconcileDuplicatePointers(state);
       if (afterModeration) console.log(`[publish] released ${afterModeration} duplicates after moderation`);
+      // Clustering runs after translation so cross-language text can match, and
+      // after moderation so it only ever merges stories that will be published.
+      const unclustered = reconcileClusterPointers(state);
+      if (unclustered) console.log(`[publish] released ${unclustered} stale cluster pointers`);
+      try {
+        const cluster = await runCrossSourceClusters(config, state, now);
+        if (cluster.reset) console.log('[publish] cluster markers reset');
+        else if (cluster.checked) console.log(`[publish] cluster checked ${cluster.checked}, ${cluster.dryRun ? 'would merge' : 'merged'} ${cluster.clusters}, deferred ${cluster.skipped}`);
+      } catch (error) { console.warn('[publish] clustering deferred:', String(error)); }
     }
     const items = visibleItems(state);
     const built = buildSnapshot(items, {
@@ -132,7 +146,7 @@ export async function runPublisher(config: IngestConfig, options: PublishOptions
     await renewal;
     if (lostLease) throw new Error('Lease lost; refusing to publish');
     await post(config, '/api/admin/publisher', { action: 'renew', token });
-    console.log(`[publish] built ${items.length} visible / ${state.records.size} retained, ${built.artifacts.length} packs`);
+    console.log(`[publish] built ${items.filter((item) => !item.clusterOf).length} cards (${items.length} resolvable) / ${state.records.size} retained, ${built.artifacts.length} packs`);
     await uploadSnapshot(config, built, token, base.snapshotId);
     console.log(`[publish] activated ${built.manifest.snapshotId}; source lastUpdated=${new Date(state.lastUpdated).toISOString()}`);
     if (!options.repackOnly) {

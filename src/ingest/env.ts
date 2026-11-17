@@ -26,11 +26,44 @@ export const DEDUPE_DEFAULTS: DedupeConfig = {
   timeoutMs: 20_000,
 };
 
+export interface ClusterConfig {
+  enabled: boolean;
+  dryRun: boolean;
+  reset: boolean;
+  windowDays: number;
+  maxChecks: number;
+  maxCandidates: number;
+  lexicalThreshold: number;
+  cosineThreshold: number;
+  textChars: number;
+  maxTexts: number;
+  timeoutMs: number;
+}
+
+/**
+ * Cross-source clustering is opt-in: a wrong merge is more visible than a
+ * missed one, so the first runs should be dry runs against real traffic.
+ */
+export const CLUSTER_DEFAULTS: ClusterConfig = {
+  enabled: false,
+  dryRun: false,
+  reset: false,
+  windowDays: 3,
+  maxChecks: 40,
+  maxCandidates: 5,
+  lexicalThreshold: 0.18,
+  cosineThreshold: 0.86,
+  textChars: 500,
+  maxTexts: 160,
+  timeoutMs: 20_000,
+};
+
 export interface IngestConfig {
   baseUrl: string;
   ingestToken: string;
   prewarmTranslations: boolean;
   dedupe: DedupeConfig;
+  cluster: ClusterConfig;
 }
 
 function flag(value: string | undefined): boolean {
@@ -61,6 +94,23 @@ export function loadDedupeConfig(env: NodeJS.ProcessEnv = process.env): DedupeCo
   };
 }
 
+/** Read the cross-source clustering switches; everything unset stays off/safe. */
+export function loadClusterConfig(env: NodeJS.ProcessEnv = process.env): ClusterConfig {
+  return {
+    enabled: flag(env.CROSS_SOURCE_CLUSTER),
+    dryRun: flag(env.CROSS_SOURCE_CLUSTER_DRY_RUN),
+    reset: flag(env.CROSS_SOURCE_CLUSTER_RESET),
+    windowDays: bounded(env.CROSS_SOURCE_CLUSTER_WINDOW_DAYS, CLUSTER_DEFAULTS.windowDays, 1, 14, true),
+    maxChecks: bounded(env.CROSS_SOURCE_CLUSTER_MAX_CHECKS, CLUSTER_DEFAULTS.maxChecks, 1, 200, true),
+    maxCandidates: bounded(env.CROSS_SOURCE_CLUSTER_MAX_CANDIDATES, CLUSTER_DEFAULTS.maxCandidates, 1, 10, true),
+    lexicalThreshold: bounded(env.CROSS_SOURCE_CLUSTER_LEXICAL, CLUSTER_DEFAULTS.lexicalThreshold, 0, 1),
+    cosineThreshold: bounded(env.CROSS_SOURCE_CLUSTER_COSINE, CLUSTER_DEFAULTS.cosineThreshold, 0.5, 0.99),
+    textChars: bounded(env.CROSS_SOURCE_CLUSTER_TEXT_CHARS, CLUSTER_DEFAULTS.textChars, 100, 1200, true),
+    maxTexts: bounded(env.CROSS_SOURCE_CLUSTER_MAX_TEXTS, CLUSTER_DEFAULTS.maxTexts, 20, 400, true),
+    timeoutMs: bounded(env.CROSS_SOURCE_CLUSTER_TIMEOUT_MS, CLUSTER_DEFAULTS.timeoutMs, 5_000, 60_000, true),
+  };
+}
+
 export function loadConfig(): IngestConfig {
   const baseUrl = (process.env.JINGKAN_BASE_URL || 'http://127.0.0.1:8787').replace(/\/+$/, '');
   const isLocal = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(baseUrl);
@@ -75,5 +125,6 @@ export function loadConfig(): IngestConfig {
     ingestToken,
     prewarmTranslations: process.env.PREWARM_TRANSLATIONS !== '0',
     dedupe: loadDedupeConfig(),
+    cluster: loadClusterConfig(),
   };
 }

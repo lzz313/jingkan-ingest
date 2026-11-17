@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEDUPE_DEFAULTS, type DedupeConfig, type IngestConfig } from '../src/ingest/env';
+import { CLUSTER_DEFAULTS, DEDUPE_DEFAULTS, type DedupeConfig, type IngestConfig } from '../src/ingest/env';
 import {
   canonicalOrder,
   cosine,
@@ -61,6 +61,7 @@ function config(dedupe: Partial<DedupeConfig> = {}): IngestConfig {
     ingestToken: 'test',
     prewarmTranslations: false,
     dedupe: { ...DEDUPE_DEFAULTS, enabled: true, ...dedupe },
+    cluster: CLUSTER_DEFAULTS,
   };
 }
 

@@ -150,10 +150,13 @@ export function buildFeedResponse(
   meta: Pick<SnapshotMeta, 'lastUpdated' | 'dataVersion'>,
   now: number,
 ): FeedResponse {
-  const hot = rankedPool(snapshotItems, 'hot', query, now);
-  const rising = rankedPool(snapshotItems, 'rising', query, now);
+  // Merged cross-source copies stay in canonical output for item lookup, but
+  // never occupy a feed slot, a count or a ranking position.
+  const feedItems = snapshotItems.filter((item) => !item.clusterOf);
+  const hot = rankedPool(feedItems, 'hot', query, now);
+  const rising = rankedPool(feedItems, 'rising', query, now);
   const totals = { hot: hot.total, rising: rising.total };
-  const dated = snapshotItems.filter((item) => inRange(item, query.from, query.to));
+  const dated = feedItems.filter((item) => inRange(item, query.from, query.to));
   const countsBySource: Partial<Record<SourceId, number>> = {};
   for (const item of dated) {
     countsBySource[item.source] = (countsBySource[item.source] ?? 0) + 1;
@@ -330,6 +333,7 @@ export function buildSnapshot(
   // Small tuples support uncommon date/limit queries without parsing bodies.
   const catalog = appendJson(items.map((item) => [
     item.id, item.source, item.publishedAt, item.fetchedAt, item.hotScore, item.isHot ? 1 : 0,
+    item.clusterOf ?? '',
   ]));
   const generatorStateParts: SnapshotRange[] = [];
   if (generatorRecords) {

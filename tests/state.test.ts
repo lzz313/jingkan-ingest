@@ -234,3 +234,36 @@ describe('duplicate pointers', () => {
     expect(removed).not.toHaveProperty('gone:old');
   });
 });
+
+describe('cross-source cluster visibility', () => {
+  it('keeps merged copies resolvable and folds one link per source into the root', () => {
+    const s = state();
+    mergeItems(s, [
+      post({ source: 'hn', externalId: '1', title: 'Root story' }),
+      post({ source: 'v2ex', externalId: '2', title: 'V2EX copy', publishedAt: now - 15000 }),
+      post({ source: 'x', externalId: '3', title: 'X copy', publishedAt: now - 5000 }),
+      post({ source: 'x', externalId: '4', title: 'X earlier copy', publishedAt: now - 20000 }),
+    ], now);
+    for (const record of s.records.values()) record.moderation = 'keep';
+    for (const id of ['v2ex:2', 'x:3', 'x:4']) {
+      s.records.get(id)!.clusterOf = 'hn:1';
+      s.records.get(id)!.cluster = { hash: s.records.get(id)!.item.contentHash, config: 'fp', checkedAt: now };
+    }
+
+    const items = visibleItems(s);
+    expect(items.map((item) => item.id)).toEqual(['hn:1', 'v2ex:2', 'x:3', 'x:4']);
+    expect(items.find((item) => item.id === 'v2ex:2')?.clusterOf).toBe('hn:1');
+    const root = items.find((item) => item.id === 'hn:1')!;
+    // Two X posts collapsed to the earliest; every related link is another source.
+    expect(root.related?.map((entry) => entry.id)).toEqual(['x:4', 'v2ex:2']);
+    expect(root.related?.every((entry) => entry.source !== root.source)).toBe(true);
+    // Merged copies are still favourites candidates, not removed IDs.
+    expect(removedItems(s)).toEqual({});
+
+    // Public derived fields must not become private state on a fresh bootstrap.
+    const [rootRecord] = bootstrapRecords([root]);
+    const [childRecord] = bootstrapRecords([items.find((item) => item.id === 'v2ex:2')!]);
+    expect(rootRecord!.item.related).toBeUndefined();
+    expect(childRecord!.item.clusterOf).toBeUndefined();
+  });
+});

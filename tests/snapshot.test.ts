@@ -97,6 +97,25 @@ describe('snapshot feed builder', () => {
     ]);
   });
 
+  it('keeps merged cross-source copies out of every view and count', () => {
+    const merged = [
+      ...items,
+      item('v2ex:dup', 'v2ex', NOW - 500, {
+        clusterOf: 'x:new', hotScore: 200, isHot: true,
+      }),
+    ];
+    const latest = buildFeedResponse(merged, query(), meta, NOW);
+    expect(latest.items.map((entry) => entry.id)).not.toContain('v2ex:dup');
+    expect(latest.counts.all).toBe(5);
+
+    const hot = buildFeedResponse(merged, query({ view: 'hot' }), meta, NOW);
+    expect(hot.items.map((entry) => entry.id)).not.toContain('v2ex:dup');
+    expect(hot.counts.all).toBe(3);
+
+    const rising = buildFeedResponse(merged, query({ view: 'rising' }), meta, NOW);
+    expect(rising.items.map((entry) => entry.id)).not.toContain('v2ex:dup');
+  });
+
   it('filters by source and produces stable cursors', () => {
     const first = buildFeedResponse(items, query({ source: 'x', limit: 1 }), meta, NOW);
     expect(first.items.map((entry) => entry.id)).toEqual(['x:new']);
@@ -133,6 +152,27 @@ describe('snapshot artifact', () => {
     expect(manifest.formatVersion).toBe(2);
     expect(canonical).toHaveLength(5);
   });
+  it('keeps merged copies in canonical output and flags them in the catalog', () => {
+    const merged = [
+      ...items,
+      item('v2ex:dup', 'v2ex', NOW - 500, { clusterOf: 'x:new' }),
+    ];
+    const { artifacts, manifest } = buildSnapshot(merged, meta, NOW);
+    const pack = artifacts[0]!.body;
+    const catalogRange = manifest.catalog;
+    const part = artifacts.find((entry) => entry.key === (catalogRange.key ?? manifest.packKey))!;
+    const tuples = JSON.parse(
+      part.body.subarray(catalogRange.offset, catalogRange.offset + catalogRange.length).toString('utf8'),
+    ) as Array<[string, SourceId, number, number, number, number, string]>;
+    expect(tuples.find((tuple) => tuple[0] === 'x:new')?.[6]).toBe('');
+    expect(tuples.find((tuple) => tuple[0] === 'v2ex:dup')?.[6]).toBe('x:new');
+
+    const canonical = JSON.parse(
+      pack.subarray(manifest.canonical.offset, manifest.canonical.offset + manifest.canonical.length).toString('utf8'),
+    ) as FeedItem[];
+    expect(canonical.map((entry) => entry.id)).toContain('v2ex:dup');
+  });
+
   it('splits packages without splitting a JSON response across artifacts', () => {
     const { artifacts, manifest } = buildSnapshot(items, meta, NOW, 4096);
     expect(artifacts.length).toBeGreaterThan(1);

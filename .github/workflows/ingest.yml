@@ -20,6 +20,14 @@ on:
         description: Clear all NodeSeek duplicate markers once
         type: boolean
         default: false
+      cluster_dry_run:
+        description: Log cross-source merge candidates without merging them
+        type: boolean
+        default: false
+      cluster_reset:
+        description: Clear all cross-source cluster markers once
+        type: boolean
+        default: false
 concurrency:
   group: jingkan-publisher
   cancel-in-progress: false
@@ -56,4 +64,15 @@ jobs:
           NODESEEK_DEDUPE_TEXT_CHARS: ${{ vars.NODESEEK_DEDUPE_TEXT_CHARS || '500' }}
           NODESEEK_DEDUPE_MAX_TEXTS: ${{ vars.NODESEEK_DEDUPE_MAX_TEXTS || '120' }}
           NODESEEK_DEDUPE_TIMEOUT_MS: ${{ vars.NODESEEK_DEDUPE_TIMEOUT_MS || '20000' }}
+          CROSS_SOURCE_CLUSTER: ${{ vars.CROSS_SOURCE_CLUSTER || '0' }}
+          CROSS_SOURCE_CLUSTER_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.cluster_dry_run && '1' || vars.CROSS_SOURCE_CLUSTER_DRY_RUN || '0' }}
+          CROSS_SOURCE_CLUSTER_RESET: ${{ github.event_name == 'workflow_dispatch' && inputs.cluster_reset && '1' || '0' }}
+          CROSS_SOURCE_CLUSTER_WINDOW_DAYS: ${{ vars.CROSS_SOURCE_CLUSTER_WINDOW_DAYS || '3' }}
+          CROSS_SOURCE_CLUSTER_MAX_CHECKS: ${{ vars.CROSS_SOURCE_CLUSTER_MAX_CHECKS || '40' }}
+          CROSS_SOURCE_CLUSTER_MAX_CANDIDATES: ${{ vars.CROSS_SOURCE_CLUSTER_MAX_CANDIDATES || '5' }}
+          CROSS_SOURCE_CLUSTER_LEXICAL: ${{ vars.CROSS_SOURCE_CLUSTER_LEXICAL || '0.18' }}
+          CROSS_SOURCE_CLUSTER_COSINE: ${{ vars.CROSS_SOURCE_CLUSTER_COSINE || '0.86' }}
+          CROSS_SOURCE_CLUSTER_TEXT_CHARS: ${{ vars.CROSS_SOURCE_CLUSTER_TEXT_CHARS || '500' }}
+          CROSS_SOURCE_CLUSTER_MAX_TEXTS: ${{ vars.CROSS_SOURCE_CLUSTER_MAX_TEXTS || '160' }}
+          CROSS_SOURCE_CLUSTER_TIMEOUT_MS: ${{ vars.CROSS_SOURCE_CLUSTER_TIMEOUT_MS || '20000' }}
         run: npm run ingest

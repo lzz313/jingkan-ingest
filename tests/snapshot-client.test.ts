@@ -4,9 +4,9 @@ import { readBaseItems } from '../src/ingest/snapshot-client';
 import { runPublisher, selectBacklog } from '../src/ingest/publisher';
 import { fetchSources } from '../src/ingest/sources';
 import type { FeedItem } from '../src/shared/types';
-import { DEDUPE_DEFAULTS } from '../src/ingest/env';
+import { CLUSTER_DEFAULTS, DEDUPE_DEFAULTS } from '../src/ingest/env';
 vi.mock('../src/ingest/sources', () => ({ fetchSources: vi.fn(async () => ({ items: [], sourceStatus: {} })) }));
-const config = { baseUrl: 'https://jing.show', ingestToken: 'test', prewarmTranslations: false, dedupe: DEDUPE_DEFAULTS };
+const config = { baseUrl: 'https://jing.show', ingestToken: 'test', prewarmTranslations: false, dedupe: DEDUPE_DEFAULTS, cluster: CLUSTER_DEFAULTS };
 const post = (id: string): FeedItem => ({
   id, source: 'hn', externalId: id.split(':')[1]!, storyKey: null, title: id, titleZh: null,
   body: 'content', brief: null, briefZh: null, bodyZh: null, url: 'https://example.com/' + id,

@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { buildDailyDigests, publishDailyDigests } from '../src/ingest/daily';
-import { DEDUPE_DEFAULTS } from '../src/ingest/env';
+import { CLUSTER_DEFAULTS, DEDUPE_DEFAULTS } from '../src/ingest/env';
 import { isDailyDigest } from '../src/shared/daily';
 import { SOURCE_IDS, type FeedItem, type SourceId } from '../src/shared/types';
 
@@ -17,6 +17,8 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 it('balances sources, caps excerpts and output size, and excludes hidden records', () => {
   const items = SOURCE_IDS.flatMap((source) => Array.from({ length: 10 }, (_, i) => item(source, i)));
   items.push({ ...item('hn', 100), hidden: true });
+  // A cross-source copy is archived with its root card, never on its own.
+  items.push({ ...item('hn', 101), clusterOf: 'hn:0' });
   items[0]!.briefZh = '长'.repeat(2000);
   const [digest] = buildDailyDigests(items, now);
   expect(digest!.total).toBe(110);
@@ -51,7 +53,7 @@ it('skips unchanged and completed archives and fences changed writes to the new 
     writes.push({ path: url.pathname, headers: new Headers(init.headers) });
     return new Response('{}');
   }));
-  expect(await publishDailyDigests({ baseUrl: 'https://jing.show', ingestToken: 'test', prewarmTranslations: false, dedupe: DEDUPE_DEFAULTS }, items, 'lease-token', 'new-snapshot')).toBe(1);
+  expect(await publishDailyDigests({ baseUrl: 'https://jing.show', ingestToken: 'test', prewarmTranslations: false, dedupe: DEDUPE_DEFAULTS, cluster: CLUSTER_DEFAULTS }, items, 'lease-token', 'new-snapshot')).toBe(1);
   expect(writes[0]!.path).toBe('/api/admin/daily/2026-11-12');
   expect(writes[0]!.headers.get('x-publisher-lease')).toBe('lease-token');
   expect(writes[0]!.headers.get('x-expected-snapshot')).toBe('new-snapshot');

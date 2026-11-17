@@ -1,6 +1,6 @@
 import { deduplicateImages } from '../shared/images';
 import { isUsableTranslation, translationText } from '../shared/translation';
-import type { FeedItem, NormalizedItem, SourceId, SourceStatus, IngestStatus } from '../shared/types';
+import type { FeedItem, NormalizedItem, RelatedItem, SourceId, SourceStatus, IngestStatus } from '../shared/types';
 import { normalizeItem } from '../shared/normalize';
 import { computeHot } from '../shared/scoring';
 import { shouldHideItem } from '../shared/spam';
@@ -23,6 +23,23 @@ export interface DedupeMarker {
   /** The canonical's contentHash when the duplicate was marked. */
   canonicalHash?: string | null;
 }
+/** Private evidence behind a cross-source merge; never published. */
+export interface ClusterMarker {
+  /** The item contentHash that was checked. */
+  hash: string | null;
+  /** Fingerprint of every setting that can change the verdict. */
+  config: string;
+  checkedAt: number;
+  model?: string;
+  /** Best candidate, kept for debugging. */
+  candidateId?: string;
+  lexical?: number;
+  cosine?: number;
+  /** Shared article/discussion URL that confirmed the merge without embeddings. */
+  sharedUrl?: string;
+  /** The root's contentHash when the merge was marked. */
+  canonicalHash?: string | null;
+}
 export interface StoredItem {
   item: FeedItem;
   observedAt: number;
@@ -32,6 +49,9 @@ export interface StoredItem {
   /** Earliest post this record duplicates; hidden while it points at one. */
   duplicateOf?: string;
   dedupe?: DedupeMarker;
+  /** Root card this record is merged into; still resolvable for favourites. */
+  clusterOf?: string;
+  cluster?: ClusterMarker;
 }
 export const STATE_RETENTION_MS = 35 * 86400000;
 export interface GeneratorState {
@@ -48,7 +68,12 @@ export type InputEvent =
   | { kind: 'maintenance'; patches: Array<{ id: string; hidden?: boolean; images?: string[] }>; createdAt: number };
 
 export function bootstrapRecords(items: FeedItem[]): StoredItem[] {
-  return items.map((item) => ({ item, observedAt: item.fetchedAt, ruleHidden: item.hidden, moderation: 'keep' }));
+  return items.map((published) => {
+    // related/clusterOf are derived from the current merge graph, not source
+    // fields; keeping them would freeze one snapshot's view into private state.
+    const { related: _related, clusterOf: _clusterOf, ...item } = published;
+    return { item, observedAt: item.fetchedAt, ruleHidden: item.hidden, moderation: 'keep' };
+  });
 }
 function moderated(source: SourceId): boolean { return (MODERATE_SOURCES as readonly SourceId[]).includes(source); }
 
@@ -90,6 +115,8 @@ export function mergeItems(state: GeneratorState, inputs: NormalizedItem[], now:
         ...(!edited && old?.aiReason ? { aiReason: old.aiReason } : {}),
         ...(!edited && old?.duplicateOf ? { duplicateOf: old.duplicateOf } : {}),
         ...(!edited && old?.dedupe ? { dedupe: old.dedupe } : {}),
+        ...(!edited && old?.clusterOf ? { clusterOf: old.clusterOf } : {}),
+        ...(!edited && old?.cluster ? { cluster: old.cluster } : {}),
       });
       changes++;
     } else {
@@ -161,10 +188,47 @@ export function reconcileState(state: GeneratorState): { hidden: number; transla
 export function pruneState(state: GeneratorState, cutoff: number): void {
   for (const [id, record] of state.records) if (record.item.publishedAt < cutoff) state.records.delete(id);
 }
+/** One link per source, oldest first: a source with two merged posts still gets one link. */
+function relatedItems(children: StoredItem[] | undefined): RelatedItem[] {
+  if (!children?.length) return [];
+  const bySource = new Map<SourceId, StoredItem>();
+  for (const child of children) {
+    const current = bySource.get(child.item.source);
+    if (!current || child.item.publishedAt < current.item.publishedAt) {
+      bySource.set(child.item.source, child);
+    }
+  }
+  return [...bySource.values()]
+    .sort((a, b) => a.item.publishedAt - b.item.publishedAt || a.item.id.localeCompare(b.item.id))
+    .map(({ item }) => ({
+      id: item.id, source: item.source, title: item.title, titleZh: item.titleZh,
+      url: item.url, author: item.author, publishedAt: item.publishedAt,
+    }));
+}
+
+/**
+ * Every item that stays resolvable in the snapshot, including merged
+ * cross-source duplicates. Feed builders filter `clusterOf`; item lookup does
+ * not, so a favourite never disappears when its story is merged.
+ */
 export function visibleItems(state: GeneratorState): FeedItem[] {
+  const children = new Map<string, StoredItem[]>();
+  for (const record of state.records.values()) {
+    if (!record.clusterOf || record.ruleHidden || record.moderation !== 'keep' || record.duplicateOf) continue;
+    const list = children.get(record.clusterOf) ?? [];
+    list.push(record);
+    children.set(record.clusterOf, list);
+  }
   return [...state.records.values()]
     .filter((record) => !record.ruleHidden && record.moderation === 'keep' && !record.duplicateOf)
-    .map((record) => ({ ...record.item, hidden: false }));
+    .map((record) => {
+      const { related: _related, clusterOf: _clusterOf, ...base } = record.item;
+      const item: FeedItem = { ...base, hidden: false };
+      if (record.clusterOf) item.clusterOf = record.clusterOf;
+      const related = relatedItems(children.get(item.id));
+      if (related.length) item.related = related;
+      return item;
+    });
 }
 export function removedItems(state: GeneratorState): Record<string, number> {
   return Object.fromEntries([...state.records.values()]
@@ -191,6 +255,26 @@ export function reconcileDuplicatePointers(state: GeneratorState): number {
     if (canonical.ruleHidden || canonical.moderation === 'hide' || canonicalEdited) {
       delete record.duplicateOf;
       delete record.dedupe;
+      cleared++;
+    }
+  }
+  return cleared;
+}
+/**
+ * Release cluster pointers whose root is gone or no longer usable. Unlike a
+ * same-source duplicate, a pruned root must release its newer children:
+ * keeping the pointer would hide the only remaining copy of the story.
+ */
+export function reconcileClusterPointers(state: GeneratorState): number {
+  let cleared = 0;
+  for (const record of state.records.values()) {
+    if (!record.clusterOf) continue;
+    const root = state.records.get(record.clusterOf);
+    const edited = record.cluster?.canonicalHash !== undefined &&
+      record.cluster.canonicalHash !== root?.item.contentHash;
+    if (!root || root.ruleHidden || root.moderation !== 'keep' || root.duplicateOf || edited) {
+      delete record.clusterOf;
+      delete record.cluster;
       cleared++;
     }
   }

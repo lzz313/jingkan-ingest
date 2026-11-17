@@ -25,7 +25,7 @@ export function buildDailyDigests(items: FeedItem[], now = Date.now()): DailyDig
   const days = new Map<string, FeedItem[]>();
   const today = beijingDate(now);
   for (const item of items) {
-    if (item.hidden || !Number.isFinite(item.publishedAt) || !/^https?:\/\//i.test(item.url)) continue;
+    if (item.hidden || item.clusterOf || !Number.isFinite(item.publishedAt) || !/^https?:\/\//i.test(item.url)) continue;
     const day = beijingDate(item.publishedAt);
     if (day > today) continue;
     const list = days.get(day) ?? [];

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IngestRequest, NormalizedItem } from '../src/shared/types';
 import { postIngest } from '../src/ingest/ingest-client';
-import { DEDUPE_DEFAULTS } from '../src/ingest/env';
+import { CLUSTER_DEFAULTS, DEDUPE_DEFAULTS } from '../src/ingest/env';
 
 function item(index: number): NormalizedItem {
   return {
@@ -38,6 +38,7 @@ describe('postIngest', () => {
         ingestToken: 'secret',
         prewarmTranslations: false,
         dedupe: DEDUPE_DEFAULTS,
+        cluster: CLUSTER_DEFAULTS,
       },
       Array.from({ length: 41 }, (_, index) => item(index)),
       { sourceStatus: { x: { ok: true, count: 41 } } },

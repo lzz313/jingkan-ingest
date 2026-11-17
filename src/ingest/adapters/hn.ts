@@ -61,6 +61,9 @@ function mapItem(item: FirebaseHnItem | null): NormalizedItem | null {
     images: extractImages(item.text, sourceUrl),
     extra: {
       hnUrl,
+      // Cross-source clustering compares this against links in other posts;
+      // the card itself keeps pointing at the HN discussion.
+      ...(item.url ? { articleUrl: item.url } : {}),
       timeSource: 'post',
     },
     contentHash: hashText(`${title}\n${body}\n${sourceUrl}`),

@@ -77,6 +77,17 @@ export interface NormalizedItem {
   contentHash?: string;
 }
 
+/** Another discussion of the same story, merged into the card as a link. */
+export interface RelatedItem {
+  id: string;
+  source: SourceId;
+  title: string;
+  titleZh: string | null;
+  url: string;
+  author: string | null;
+  publishedAt: number;
+}
+
 export interface FeedItem {
   id: string;
   source: SourceId;
@@ -101,6 +112,10 @@ export interface FeedItem {
   extra: ItemExtra;
   hidden: boolean;
   contentHash: string | null;
+  /** Set on a merged duplicate: the id of the card it belongs to. */
+  clusterOf?: string | null;
+  /** Present on the cluster root; one link per source, oldest first. */
+  related?: RelatedItem[];
 }
 
 export type FeedView = 'latest' | 'hot' | 'rising';
