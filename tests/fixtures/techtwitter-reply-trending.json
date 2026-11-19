@@ -1,0 +1,17 @@
+{
+  "tweets": [
+    {
+      "id": "tech-twitter-reply",
+      "x_post_id": "2121099999999999999",
+      "x_url": "https://x.com/i/status/2121099999999999999",
+      "headline": "A reply in a long thread",
+      "summary": "This is a reply rather than a standalone post.",
+      "topics": ["artificial intelligence"],
+      "quality_score": 9,
+      "content_type": "tweet",
+      "posted_at": "2026-11-13T03:40:00+00:00"
+    }
+  ],
+  "total": 1,
+  "hasMore": false
+}

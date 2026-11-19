@@ -1,22 +1,74 @@
 import { createHash } from 'node:crypto';
 import { beijingDate, type DailyDigest, type DailyEntry } from '../shared/daily';
-import { SOURCE_IDS, type FeedItem } from '../shared/types';
+import type { FeedItem, SourceId } from '../shared/types';
 import { firstSentences, stripHtml, stripMarkdown } from '../shared/html';
-import { isUsableTranslation } from '../shared/translation';
+import { isChineseBrief, isUsableTranslation } from '../shared/translation';
 import { sourceNeedsTitleTranslation } from '../shared/sources';
 import type { IngestConfig } from './env';
 import { call } from './snapshot-client';
 
+const DAILY_LIMIT = 12;
+const PER_SOURCE_LIMIT = 2;
+
+/**
+ * Editorial prior on top of engagement. Curated sources (a personal blog,
+ * first-party AI posts, papers) rarely have a hot score, but they are strong
+ * daily reads; community sources get their quality from the engagement score.
+ */
+const SOURCE_QUALITY: Partial<Record<SourceId, number>> = {
+  simonw: 30,
+  'google-ai': 28,
+  'hf-papers': 24,
+  hn: 14,
+  github: 12,
+  v2ex: 10,
+  linuxdo: 10,
+  nodeseek: 10,
+  reddit: 8,
+  producthunt: 8,
+  x: 5,
+};
+
+/**
+ * Quality-first score: engagement dominates, substance and editorial source
+ * priors break ties, and the per-source cap below supplies diversity.
+ */
+export function dailyQuality(item: FeedItem): number {
+  const text = `${item.title}\n${item.body ?? ''}`;
+  const link = /https?:\/\//i.test(text) || typeof item.extra.canonicalUrl === 'string' ? 5 : 0;
+  const substance = Math.min(6, Math.floor((item.body?.length ?? 0) / 400));
+  return (
+    Math.max(0, item.hotScore) * 0.55 +
+    (SOURCE_QUALITY[item.source] ?? 0) +
+    (item.isHot ? 8 : 0) +
+    link +
+    substance
+  );
+}
+
 function entryFor(item: FeedItem): DailyEntry {
-  const title = sourceNeedsTitleTranslation(item.source) && isUsableTranslation(item.title, item.titleZh) ? item.titleZh! : item.title;
-  const summary = item.source === 'hn' && isUsableTranslation(item.body, item.bodyZh) ? item.bodyZh :
-    isUsableTranslation(item.brief, item.briefZh) ? item.briefZh : item.brief || item.body;
+  const rawTitle = stripHtml(item.title).slice(0, 320);
+  const translatedTitle =
+    sourceNeedsTitleTranslation(item.source) &&
+    isUsableTranslation(item.title, item.titleZh) &&
+    item.titleZh !== item.title
+      ? stripHtml(item.titleZh!).slice(0, 320)
+      : '';
+  const title = translatedTitle || rawTitle;
+  const originalTitle = translatedTitle && rawTitle && translatedTitle !== rawTitle ? rawTitle : undefined;
+  const briefZh = isChineseBrief(item.briefZh) ? item.briefZh : null;
+  const summary = item.source === 'hn' && isUsableTranslation(item.body, item.bodyZh)
+    ? item.bodyZh
+    : briefZh || item.brief || item.body;
   return {
-    id: item.id, source: item.source, title: stripHtml(title).slice(0, 320),
+    id: item.id, source: item.source, title,
+    ...(originalTitle ? { originalTitle } : {}),
     summary: firstSentences(stripMarkdown(stripHtml(summary)), 220), url: item.url,
     author: (item.source === 'x' && item.authorHandle ? '@' + item.authorHandle : item.author)?.slice(0, 200) ?? null,
     publishedAt: item.publishedAt,
-    reason: item.isHot ? '来源均衡选入；已达到该来源的活跃度门槛。' : '来源均衡选入；在同来源中按活跃度和发布时间排序。',
+    reason: item.isHot
+      ? '质量优先选入；已达到该来源的活跃度门槛。'
+      : '质量优先选入；综合互动、内容质量和来源信度排序。',
   };
 }
 
@@ -34,24 +86,71 @@ export function buildDailyDigests(items: FeedItem[], now = Date.now()): DailyDig
   }
   return [...days.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([day, list]) => {
     const sources: DailyDigest['sources'] = {};
-    const groups = new Map<string, FeedItem[]>();
-    for (const source of SOURCE_IDS) {
-      const group = list.filter((item) => item.source === source).sort((a, b) =>
-        Number(b.isHot) - Number(a.isHot) || b.hotScore - a.hotScore || b.publishedAt - a.publishedAt || a.id.localeCompare(b.id));
-      if (group.length) { sources[source] = group.length; groups.set(source, group.slice(0, 2)); }
-    }
-    // Rotate the source receiving the extra slot so a large source cannot dominate.
-    const offset = Math.floor(Date.parse(day + 'T00:00:00Z') / 86400000) % SOURCE_IDS.length;
-    const order = [...SOURCE_IDS.slice(offset), ...SOURCE_IDS.slice(0, offset)];
+    for (const item of list) sources[item.source] = (sources[item.source] ?? 0) + 1;
+
+    // Rank the whole day by quality, then enforce source diversity while
+    // filling. Two per source is also the archive validator's hard limit.
     const selected: FeedItem[] = [];
-    for (let round = 0; round < 2; round++) {
-      for (const source of order) {
-        const item = groups.get(source)?.[round];
-        if (item && selected.length < 12) selected.push(item);
-      }
+    const perSource = new Map<SourceId, number>();
+    const candidates = list
+      .filter((item) => item.hotEligible !== false)
+      .sort((a, b) =>
+        dailyQuality(b) - dailyQuality(a) ||
+        b.publishedAt - a.publishedAt ||
+        a.id.localeCompare(b.id));
+    for (const item of candidates) {
+      if (selected.length >= DAILY_LIMIT) break;
+      const count = perSource.get(item.source) ?? 0;
+      if (count >= PER_SOURCE_LIMIT) continue;
+      selected.push(item);
+      perSource.set(item.source, count + 1);
     }
     return { version: 1, day, total: list.length, sources, entries: selected.map(entryFor) };
   });
+}
+
+const INDEXNOW_ENDPOINT = 'https://api.indexnow.org/indexnow';
+
+/** Notify IndexNow (Bing / Yandex / ChatGPT Search) when public archive pages change. */
+export async function notifyIndexNow(config: IngestConfig, updatedDays: string[]): Promise<boolean> {
+  const key = config.indexNowKey?.trim();
+  if (!key || !/^[a-zA-Z0-9-]{8,128}$/.test(key) || updatedDays.length === 0) return false;
+  let origin: URL;
+  try {
+    origin = new URL(config.baseUrl);
+  } catch {
+    return false;
+  }
+  if (origin.protocol !== 'https:' || origin.hostname === 'localhost' || origin.hostname === '127.0.0.1') {
+    return false;
+  }
+  const urlList = [
+    `${origin.origin}/`,
+    `${origin.origin}/hot`,
+    `${origin.origin}/daily`,
+    ...updatedDays.map((day) => `${origin.origin}/daily/${day}`),
+  ];
+  try {
+    const response = await fetch(INDEXNOW_ENDPOINT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({
+        host: origin.hostname,
+        key,
+        keyLocation: `${origin.origin}/${key}.txt`,
+        urlList,
+      }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!response.ok) {
+      console.warn(`[indexnow] HTTP ${response.status} for ${urlList.length} urls`);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.warn('[indexnow] deferred:', String(error));
+    return false;
+  }
 }
 
 export async function publishDailyDigests(config: IngestConfig, items: FeedItem[], token: string, snapshotId: string): Promise<number> {
@@ -61,7 +160,7 @@ export async function publishDailyDigests(config: IngestConfig, items: FeedItem[
     const index = await (await call(config, `/api/admin/daily?year=${year}`)).json() as { hashes: Record<string, string> };
     Object.assign(hashes, index.hashes);
   }
-  let updated = 0;
+  const updatedDays: string[] = [];
   const yesterday = beijingDate(Date.now() - 86400000);
   for (const digest of digests) {
     // Completed historical pages stay intact as the rolling timeline expires.
@@ -75,7 +174,10 @@ export async function publishDailyDigests(config: IngestConfig, items: FeedItem[
         'x-publisher-lease': token, 'x-expected-snapshot': snapshotId,
       },
     });
-    updated++;
+    updatedDays.push(digest.day);
   }
-  return updated;
+  if (updatedDays.length > 0) {
+    await notifyIndexNow(config, updatedDays);
+  }
+  return updatedDays.length;
 }

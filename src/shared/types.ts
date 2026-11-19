@@ -116,6 +116,8 @@ export interface FeedItem {
   clusterOf?: string | null;
   /** Present on the cluster root; one link per source, oldest first. */
   related?: RelatedItem[];
+  /** False excludes an item from the hot and rising views; absent means eligible. */
+  hotEligible?: boolean;
 }
 
 export type FeedView = 'latest' | 'hot' | 'rising';

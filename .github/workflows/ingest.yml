@@ -64,6 +64,9 @@ jobs:
           NODESEEK_DEDUPE_TEXT_CHARS: ${{ vars.NODESEEK_DEDUPE_TEXT_CHARS || '500' }}
           NODESEEK_DEDUPE_MAX_TEXTS: ${{ vars.NODESEEK_DEDUPE_MAX_TEXTS || '120' }}
           NODESEEK_DEDUPE_TIMEOUT_MS: ${{ vars.NODESEEK_DEDUPE_TIMEOUT_MS || '20000' }}
+          X_TRUSTED_HANDLES: ${{ vars.X_TRUSTED_HANDLES || '' }}
+          X_HOT_GATE: ${{ vars.X_HOT_GATE || '1' }}
+          INDEXNOW_KEY: ${{ vars.INDEXNOW_KEY || '' }}
           CROSS_SOURCE_CLUSTER: ${{ vars.CROSS_SOURCE_CLUSTER || '0' }}
           CROSS_SOURCE_CLUSTER_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.cluster_dry_run && '1' || vars.CROSS_SOURCE_CLUSTER_DRY_RUN || '0' }}
           CROSS_SOURCE_CLUSTER_RESET: ${{ github.event_name == 'workflow_dispatch' && inputs.cluster_reset && '1' || '0' }}

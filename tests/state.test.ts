@@ -70,6 +70,34 @@ describe('visibility and durable verdicts', () => {
     const bootstrap = bootstrapRecords(visibleItems(s));
     expect(bootstrap[0]!.moderation).toBe('keep');
   });
+  it('marks X hot eligibility from trust or a cross-source confirmation', () => {
+    const s = state();
+    mergeItems(s, [
+      post({ source: 'x', externalId: 'trusted', authorHandle: 'trq212' }),
+      post({ source: 'x', externalId: 'random', authorHandle: 'randomacct' }),
+      post({ source: 'hn', externalId: '9', title: 'Same story on Hacker News' }),
+    ], now);
+    // Another source discussing the same story confirms the random X post.
+    s.records.get('hn:9')!.clusterOf = 'x:random';
+
+    const items = visibleItems(s, { trustedXHandles: new Set(['trq212']) });
+    const byId = new Map(items.map((item) => [item.id, item]));
+    expect(byId.get('x:trusted')?.hotEligible).toBe(true);
+    expect(byId.get('x:random')?.hotEligible).toBe(true);
+    expect(items.find((item) => item.id === 'hn:9')?.hotEligible).toBeUndefined();
+
+    const untrusted = visibleItems(s, { trustedXHandles: new Set(['someoneelse']) });
+    expect(untrusted.find((item) => item.id === 'x:trusted')?.hotEligible).toBe(false);
+
+    // The rollback switch leaves every X post eligible again.
+    const disabled = visibleItems(s, { hotGateEnabled: false });
+    expect(disabled.find((item) => item.id === 'x:trusted')?.hotEligible).toBeUndefined();
+    expect(disabled.find((item) => item.id === 'x:random')?.hotEligible).toBeUndefined();
+
+    // Derived eligibility must not be frozen into private state on bootstrap.
+    const [record] = bootstrapRecords(untrusted);
+    expect(record!.item.hotEligible).toBeUndefined();
+  });
 });
 describe('events, retention and source freshness', () => {
   it('applies enrichment idempotently only to matching content hashes', () => {

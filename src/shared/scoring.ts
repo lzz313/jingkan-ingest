@@ -5,6 +5,23 @@ export interface HotResult {
   score: number;
 }
 
+/** A day-old post keeps half its stored hot score when ranked. */
+export const HOT_HALF_LIFE_MS = 24 * 60 * 60_000;
+
+/**
+ * Apply publication-time decay at ranking time. Stored `hotScore` remains the
+ * source's raw engagement signal; a re-fetched old post therefore cannot jump
+ * back to the top of the hot view on freshly updated metrics alone.
+ */
+export function hotRankScore(
+  hotScore: number,
+  publishedAt: number,
+  now: number,
+): number {
+  const age = Math.max(0, now - publishedAt);
+  return hotScore * Math.pow(0.5, age / HOT_HALF_LIFE_MS);
+}
+
 function finite(value: number | undefined): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }

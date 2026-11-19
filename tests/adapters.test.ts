@@ -466,6 +466,25 @@ describe('X adapter', () => {
     expect(items.every((item) => item.extra?.provider === 'tech-twitter')).toBe(true);
   });
 
+  it('marks a syndicated reply so the hot gate can drop it', async () => {
+    stubFetch([
+      {
+        match: 'techtwitter.com/api/tweets/trending',
+        file: 'techtwitter-reply-trending.json',
+        type: 'application/json',
+      },
+      {
+        match: 'tweet-result?id=2121099999999999999',
+        file: 'techtwitter-reply-tweet.json',
+        type: 'application/json',
+      },
+    ]);
+    const items = await fetchX(Date.UTC(2026, 10, 13, 20, 0));
+    expect(items).toHaveLength(1);
+    expect(items[0]!.extra?.isReply).toBe(true);
+    expect(items[0]!.extra?.replyTo).toBe('2121099999999999998');
+  });
+
   it('keeps X 榜单 available when Tech Twitter fails', async () => {
     stubFetch([
       { match: 'xbangdan.com/posts/', file: 'xbangdan-posts.html', type: 'text/html' },

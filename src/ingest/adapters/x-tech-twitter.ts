@@ -59,6 +59,8 @@ interface SyndicationTweet {
   favorite_count?: number;
   conversation_count?: number;
   created_at?: string;
+  in_reply_to_status_id_str?: string;
+  in_reply_to_screen_name?: string;
   user?: SyndicationUser;
   photos?: SyndicationPhoto[] | number;
   mediaDetails?: Array<SyndicationPhoto & { type?: string }>;
@@ -72,6 +74,7 @@ interface EnrichedTechTwitterPost {
   publishedAt?: number;
   likes?: number;
   replies?: number;
+  replyTo?: string;
   images: string[];
 }
 
@@ -181,6 +184,7 @@ async function enrichFromSyndication(
       publishedAt: parseTime(result.created_at) ?? undefined,
       likes: finiteMetric(result.favorite_count),
       replies: finiteMetric(result.conversation_count),
+      replyTo: result.in_reply_to_status_id_str ?? result.in_reply_to_screen_name,
       images: images.slice(0, 8),
     };
   } catch {
@@ -232,6 +236,7 @@ function toItem(
       corePosts: [corePost],
       timeSource: 'post',
       statsSource: enriched.text ? 'x-syndication' : 'tech-twitter',
+      ...(enriched.replyTo ? { isReply: true, replyTo: enriched.replyTo } : {}),
     },
     contentHash: hashText(`${title}\n${body}\n${url}`),
   };

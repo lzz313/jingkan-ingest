@@ -3,7 +3,7 @@ import { isSourceId } from './sources';
 
 export const DAILY_PREFIX = 'seo/daily/';
 export interface DailyEntry {
-  id: string; source: SourceId; title: string; summary: string; url: string; author: string | null;
+  id: string; source: SourceId; title: string; originalTitle?: string; summary: string; url: string; author: string | null;
   publishedAt: number; reason: string;
 }
 export interface DailyDigest {
@@ -29,7 +29,9 @@ export function isDailyDigest(value: unknown): value is DailyDigest {
   const perSource = new Map<string, number>();
   return digest.entries.every((entry) => {
     if (!entry || !isSourceId(entry.source) || typeof entry.id !== 'string' || !entry.id.length || entry.id.length > 256 || ids.has(entry.id) ||
-      typeof entry.title !== 'string' || !entry.title.trim() || entry.title.length > 320 || typeof entry.summary !== 'string' || entry.summary.length > 600 ||
+      typeof entry.title !== 'string' || !entry.title.trim() || entry.title.length > 320 ||
+      (entry.originalTitle !== undefined && (typeof entry.originalTitle !== 'string' || !entry.originalTitle.trim() || entry.originalTitle.length > 320)) ||
+      typeof entry.summary !== 'string' || entry.summary.length > 600 ||
       typeof entry.url !== 'string' || entry.url.length > 4000 || (entry.author !== null && (typeof entry.author !== 'string' || entry.author.length > 200)) ||
       !Number.isFinite(entry.publishedAt) || entry.publishedAt < 0 || entry.publishedAt > 253402271999999 || beijingDate(entry.publishedAt) !== digest.day ||
       typeof entry.reason !== 'string' || !entry.reason.length || entry.reason.length > 200 || !digest.sources[entry.source]) return false;

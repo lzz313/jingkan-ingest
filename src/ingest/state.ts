@@ -7,6 +7,7 @@ import { shouldHideItem } from '../shared/spam';
 import { MODERATE_SOURCES } from '../shared/moderate';
 import { sourceNeedsTitleTranslation } from '../shared/sources';
 import { contentExtra } from '../shared/content-extra';
+import { DEFAULT_X_TRUSTED_HANDLES, xHotEligible } from '../shared/x-quality';
 
 /** Private evidence behind a duplicate verdict; never published to feed items. */
 export interface DedupeMarker {
@@ -69,9 +70,10 @@ export type InputEvent =
 
 export function bootstrapRecords(items: FeedItem[]): StoredItem[] {
   return items.map((published) => {
-    // related/clusterOf are derived from the current merge graph, not source
-    // fields; keeping them would freeze one snapshot's view into private state.
-    const { related: _related, clusterOf: _clusterOf, ...item } = published;
+    // related/clusterOf/hotEligible are derived from the current merge graph
+    // and quality policy, not source fields; keeping them would freeze one
+    // snapshot's view into private state.
+    const { related: _related, clusterOf: _clusterOf, hotEligible: _hotEligible, ...item } = published;
     return { item, observedAt: item.fetchedAt, ruleHidden: item.hidden, moderation: 'keep' };
   });
 }
@@ -206,12 +208,23 @@ function relatedItems(children: StoredItem[] | undefined): RelatedItem[] {
     }));
 }
 
+export interface VisibleItemOptions {
+  /** Overrides the curated X allowlist; unset keeps the defaults. */
+  trustedXHandles?: ReadonlySet<string>;
+  /** Set false to roll the X hot-view gate back; unset keeps it enabled. */
+  hotGateEnabled?: boolean;
+}
+
 /**
  * Every item that stays resolvable in the snapshot, including merged
  * cross-source duplicates. Feed builders filter `clusterOf`; item lookup does
  * not, so a favourite never disappears when its story is merged.
  */
-export function visibleItems(state: GeneratorState): FeedItem[] {
+export function visibleItems(
+  state: GeneratorState,
+  options: VisibleItemOptions = {},
+): FeedItem[] {
+  const trustedXHandles = options.trustedXHandles ?? DEFAULT_X_TRUSTED_HANDLES;
   const children = new Map<string, StoredItem[]>();
   for (const record of state.records.values()) {
     if (!record.clusterOf || record.ruleHidden || record.moderation !== 'keep' || record.duplicateOf) continue;
@@ -222,11 +235,14 @@ export function visibleItems(state: GeneratorState): FeedItem[] {
   return [...state.records.values()]
     .filter((record) => !record.ruleHidden && record.moderation === 'keep' && !record.duplicateOf)
     .map((record) => {
-      const { related: _related, clusterOf: _clusterOf, ...base } = record.item;
+      const { related: _related, clusterOf: _clusterOf, hotEligible: _hotEligible, ...base } = record.item;
       const item: FeedItem = { ...base, hidden: false };
       if (record.clusterOf) item.clusterOf = record.clusterOf;
       const related = relatedItems(children.get(item.id));
       if (related.length) item.related = related;
+      if (item.source === 'x' && options.hotGateEnabled !== false) {
+        item.hotEligible = xHotEligible(item, related.length, trustedXHandles);
+      }
       return item;
     });
 }

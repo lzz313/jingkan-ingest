@@ -137,7 +137,10 @@ export async function runPublisher(config: IngestConfig, options: PublishOptions
         else if (cluster.checked) console.log(`[publish] cluster checked ${cluster.checked}, ${cluster.dryRun ? 'would merge' : 'merged'} ${cluster.clusters}, deferred ${cluster.skipped}`);
       } catch (error) { console.warn('[publish] clustering deferred:', String(error)); }
     }
-    const items = visibleItems(state);
+    const items = visibleItems(state, {
+      trustedXHandles: config.xTrustedHandles,
+      hotGateEnabled: config.xHotGate !== false,
+    });
     const built = buildSnapshot(items, {
       dataVersion: base.dataVersion + 1, lastUpdated: state.lastUpdated, lastRefreshAt: state.lastRefreshAt,
       lastIngestAttemptAt: state.lastIngestAttemptAt, sources: state.sources,

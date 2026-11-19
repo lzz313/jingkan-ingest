@@ -9,12 +9,16 @@ import type {
 } from '../shared/types';
 import { SOURCE_IDS } from '../shared/types';
 import { LATEST_ONLY_SOURCES, isSourceId } from '../shared/sources';
+import { hotRankScore } from '../shared/scoring';
 
 const DAY_MS = 24 * 60 * 60_000;
 const BEIJING_OFFSET_MS = 8 * 60 * 60_000;
 const HOT_PER_SOURCE = 5;
 const RISING_PER_SOURCE = 8;
 const HOT_FRESH_MS = DAY_MS;
+// Re-fetching an old post refreshes `fetchedAt`; a publication window keeps it
+// from resurrecting in the hot view even before decay has pushed it down.
+const HOT_MAX_AGE_MS = 3 * DAY_MS;
 const RISING_WINDOW_MS = DAY_MS;
 const SNAPSHOT_FORMAT_VERSION = 2;
 export const SNAPSHOT_PACK_TARGET_BYTES = 8 * 1024 * 1024;
@@ -76,8 +80,12 @@ function compareLatest(a: FeedItem, b: FeedItem): number {
   return b.publishedAt - a.publishedAt || b.id.localeCompare(a.id);
 }
 
-function compareRanked(a: FeedItem, b: FeedItem): number {
-  return b.hotScore - a.hotScore || compareLatest(a, b);
+function compareRanked(a: FeedItem, b: FeedItem, now: number): number {
+  return (
+    hotRankScore(b.hotScore, b.publishedAt, now) -
+      hotRankScore(a.hotScore, a.publishedAt, now) ||
+    compareLatest(a, b)
+  );
 }
 
 function inRange(item: FeedItem, from?: number, to?: number): boolean {
@@ -117,8 +125,10 @@ function rankedPool(
     (query.to !== undefined ? query.to - RISING_WINDOW_MS : now - RISING_WINDOW_MS);
   const groups = new Map<string, FeedItem[]>();
   for (const item of items) {
+    if (item.hotEligible === false) continue;
     if (view === 'hot') {
       if (item.fetchedAt < now - HOT_FRESH_MS) continue;
+      if (item.publishedAt < now - HOT_MAX_AGE_MS) continue;
       if (LATEST_ONLY_SOURCES.has(item.source)) continue;
       if (item.source === 'hf-papers' && !item.isHot) continue;
       if (!inRange(item, query.from, query.to)) continue;
@@ -135,12 +145,12 @@ function rankedPool(
   const ranked: FeedItem[] = [];
   let total = 0;
   for (const [source, group] of groups) {
-    const top = group.sort(compareRanked).slice(0, perSource);
+    const top = group.sort((a, b) => compareRanked(a, b, now)).slice(0, perSource);
     bySource.set(source, top);
     ranked.push(...top);
     total += top.length;
   }
-  ranked.sort(compareRanked);
+  ranked.sort((a, b) => compareRanked(a, b, now));
   return { bySource, items: ranked, total };
 }
 
@@ -333,7 +343,7 @@ export function buildSnapshot(
   // Small tuples support uncommon date/limit queries without parsing bodies.
   const catalog = appendJson(items.map((item) => [
     item.id, item.source, item.publishedAt, item.fetchedAt, item.hotScore, item.isHot ? 1 : 0,
-    item.clusterOf ?? '',
+    item.clusterOf ?? '', item.hotEligible === false ? 0 : 1,
   ]));
   const generatorStateParts: SnapshotRange[] = [];
   if (generatorRecords) {

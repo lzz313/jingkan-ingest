@@ -1,3 +1,5 @@
+import { parseXTrustedHandles } from '../shared/x-quality';
+
 export interface DedupeConfig {
   enabled: boolean;
   dryRun: boolean;
@@ -64,6 +66,12 @@ export interface IngestConfig {
   prewarmTranslations: boolean;
   dedupe: DedupeConfig;
   cluster: ClusterConfig;
+  /** Replaces the curated X hot-view allowlist when configured. */
+  xTrustedHandles?: ReadonlySet<string>;
+  /** Set X_HOT_GATE=0 to roll the hot-view quality gate back. */
+  xHotGate?: boolean;
+  /** Optional public IndexNow key matching `/<key>.txt` on the Worker. */
+  indexNowKey?: string;
 }
 
 function flag(value: string | undefined): boolean {
@@ -126,5 +134,8 @@ export function loadConfig(): IngestConfig {
     prewarmTranslations: process.env.PREWARM_TRANSLATIONS !== '0',
     dedupe: loadDedupeConfig(),
     cluster: loadClusterConfig(),
+    xTrustedHandles: parseXTrustedHandles(process.env.X_TRUSTED_HANDLES),
+    xHotGate: process.env.X_HOT_GATE !== '0',
+    indexNowKey: process.env.INDEXNOW_KEY?.trim() || undefined,
   };
 }

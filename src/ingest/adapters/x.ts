@@ -204,6 +204,7 @@ function toItem(candidate: Candidate, now: number): NormalizedItem | null {
   }
 
   const category = 'AI 编程';
+  const isReply = /^@[a-z0-9_]{1,20}\b/i.test(candidate.text.trimStart());
   const corePost: CorePost = {
     url,
     label: firstSentences(candidate.text, 90),
@@ -236,6 +237,7 @@ function toItem(candidate: Candidate, now: number): NormalizedItem | null {
       viewsPerHour: candidate.viewsPerHour,
       timeSource: 'post',
       statsSource: 'xbangdan',
+      ...(isReply ? { isReply: true } : {}),
     },
     contentHash: hashText(`${candidate.text}\n${url}`),
   };

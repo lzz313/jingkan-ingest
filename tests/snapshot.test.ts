@@ -10,6 +10,7 @@ import {
 } from '../src/ingest/snapshot';
 
 const NOW = 1_800_000_000_000;
+const DAY = 24 * 60 * 60_000;
 
 function item(
   id: string,
@@ -116,6 +117,33 @@ describe('snapshot feed builder', () => {
     expect(rising.items.map((entry) => entry.id)).not.toContain('v2ex:dup');
   });
 
+  it('keeps hot-ineligible and re-fetched old posts out of ranked views', () => {
+    const gated = [
+      ...items,
+      item('x:gated', 'x', NOW - 500, { hotScore: 1000, isHot: true, hotEligible: false }),
+      item('hn:refetched', 'hn', NOW - 4 * DAY, { fetchedAt: NOW, hotScore: 1000, isHot: true }),
+    ];
+    const hot = buildFeedResponse(gated, query({ view: 'hot' }), meta, NOW);
+    expect(hot.items.map((entry) => entry.id)).not.toContain('x:gated');
+    expect(hot.items.map((entry) => entry.id)).not.toContain('hn:refetched');
+    expect(hot.counts.all).toBe(3);
+
+    // Latest still shows both; only the ranked views apply the quality gate.
+    const latest = buildFeedResponse(gated, query(), meta, NOW);
+    expect(latest.items.map((entry) => entry.id)).toEqual(
+      expect.arrayContaining(['x:gated', 'hn:refetched']),
+    );
+  });
+
+  it('decays stored hot scores by publication age', () => {
+    const aged = [
+      item('hn:old', 'hn', NOW - DAY, { hotScore: 90, isHot: true }),
+      item('hn:new', 'hn', NOW - 1_000, { hotScore: 60, isHot: true }),
+    ];
+    const hot = buildFeedResponse(aged, query({ view: 'hot' }), meta, NOW);
+    expect(hot.items.map((entry) => entry.id)).toEqual(['hn:new', 'hn:old']);
+  });
+
   it('filters by source and produces stable cursors', () => {
     const first = buildFeedResponse(items, query({ source: 'x', limit: 1 }), meta, NOW);
     expect(first.items.map((entry) => entry.id)).toEqual(['x:new']);
@@ -156,6 +184,7 @@ describe('snapshot artifact', () => {
     const merged = [
       ...items,
       item('v2ex:dup', 'v2ex', NOW - 500, { clusterOf: 'x:new' }),
+      item('x:gated', 'x', NOW - 500, { hotEligible: false }),
     ];
     const { artifacts, manifest } = buildSnapshot(merged, meta, NOW);
     const pack = artifacts[0]!.body;
@@ -163,9 +192,11 @@ describe('snapshot artifact', () => {
     const part = artifacts.find((entry) => entry.key === (catalogRange.key ?? manifest.packKey))!;
     const tuples = JSON.parse(
       part.body.subarray(catalogRange.offset, catalogRange.offset + catalogRange.length).toString('utf8'),
-    ) as Array<[string, SourceId, number, number, number, number, string]>;
+    ) as Array<[string, SourceId, number, number, number, number, string, number]>;
     expect(tuples.find((tuple) => tuple[0] === 'x:new')?.[6]).toBe('');
     expect(tuples.find((tuple) => tuple[0] === 'v2ex:dup')?.[6]).toBe('x:new');
+    expect(tuples.find((tuple) => tuple[0] === 'x:new')?.[7]).toBe(1);
+    expect(tuples.find((tuple) => tuple[0] === 'x:gated')?.[7]).toBe(0);
 
     const canonical = JSON.parse(
       pack.subarray(manifest.canonical.offset, manifest.canonical.offset + manifest.canonical.length).toString('utf8'),
