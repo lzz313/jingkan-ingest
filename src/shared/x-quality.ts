@@ -34,6 +34,20 @@ export const DEFAULT_X_TRUSTED_HANDLES: ReadonlySet<string> = new Set([
 ]);
 
 const EXTERNAL_LINK = /https?:\/\//i;
+
+/**
+ * Tech Twitter canonical URLs point at the aggregator's own page, so they do
+ * not prove that a post links to an external article.
+ */
+function isExternalCanonical(value: string): boolean {
+  if (!EXTERNAL_LINK.test(value)) return false;
+  try {
+    const host = new URL(value).hostname.toLowerCase().replace(/^www\./, '');
+    return host !== 'techtwitter.com' && !host.endsWith('.techtwitter.com');
+  } catch {
+    return false;
+  }
+}
 /**
  * Joke/meme markers strong enough to matter when a post has no link and is
  * short. Ordinary commentary without a marker is left alone: the trusted
@@ -72,7 +86,7 @@ export function isPureJokeXPost(item: XPostShape): boolean {
   const text = `${item.title}\n${item.body ?? ''}`.replace(/\s+/g, ' ').trim();
   if (!text) return true;
   const canonical = typeof item.extra?.canonicalUrl === 'string' ? item.extra.canonicalUrl : '';
-  const linked = EXTERNAL_LINK.test(text) || EXTERNAL_LINK.test(canonical);
+  const linked = EXTERNAL_LINK.test(text) || isExternalCanonical(canonical);
   return !linked && text.length < 160 && JOKE_MARKER.test(text);
 }
 

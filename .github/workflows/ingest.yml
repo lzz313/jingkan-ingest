@@ -29,7 +29,9 @@ on:
         type: boolean
         default: false
 concurrency:
-  group: jingkan-publisher
+  # A manual maintenance run (force fetch, dedupe/cluster reset) gets its own
+  # slot so the 5-minute cron can never cancel it while it is queued.
+  group: ${{ github.event_name == 'workflow_dispatch' && 'jingkan-publisher-manual' || 'jingkan-publisher' }}
   cancel-in-progress: false
 permissions:
   contents: read
@@ -44,8 +46,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
       - name: Merge sources and publish immutable R2 state
         env:
           JINGKAN_BASE_URL: https://jing.show

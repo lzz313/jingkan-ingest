@@ -1,5 +1,5 @@
 import { hashText, stripHtml } from '../shared/html';
-import { isUsableTranslation } from '../shared/translation';
+import { isChineseBrief, isUsableTranslation } from '../shared/translation';
 import type { FeedItem } from '../shared/types';
 import type { ClusterConfig, IngestConfig } from './env';
 import { createEmbedder } from './embed-client';
@@ -10,7 +10,7 @@ const ALGORITHM_VERSION = 'cross-source-cluster-v2';
 const DAY_MS = 86400000;
 const TRACKING_PARAM = /^(?:utm_.+|ref|aff|spm|from|share|share_token)$/i;
 const IMAGE_PATH = /\.(?:png|jpe?g|gif|webp|avif|bmp|svg)$/i;
-const LINK_FIELDS = ['articleUrl', 'arxivUrl', 'paperUrl', 'productUrl', 'hnUrl'] as const;
+const LINK_FIELDS = ['articleUrl', 'arxivUrl', 'paperUrl', 'productUrl', 'hnUrl', 'redditUrl'] as const;
 const MIN_BODY_TOKENS = 8;
 const MIN_LATIN_CHARS = 3;
 /**
@@ -161,8 +161,8 @@ function containment(a: Set<string>, b: Set<string>): number {
  */
 function buildFeature(item: FeedItem): Feature {
   const titleZh = isUsableTranslation(item.title, item.titleZh) ? item.titleZh : null;
-  const briefOriginal = item.brief || item.body || item.title;
-  const briefZh = isUsableTranslation(briefOriginal, item.briefZh) ? item.briefZh : null;
+  // briefZh is the Chinese key-point row; a meta-note or a bare 无 is noise.
+  const briefZh = isChineseBrief(item.briefZh) ? item.briefZh : null;
   const bodyZh = isUsableTranslation(item.body, item.bodyZh) ? item.bodyZh : null;
   const title = [item.title, titleZh].filter(Boolean).join(' ');
   const body = [bodyZh, briefZh, item.brief, item.body].filter(Boolean).join('\n');
@@ -201,13 +201,6 @@ function lexicalScore(a: Feature, b: Feature): number {
   return Math.min(1, score);
 }
 
-function sharedLink(a: Feature, b: Feature): string | null {
-  if (!a.links.size || !b.links.size) return null;
-  const [small, large] = a.links.size <= b.links.size ? [a.links, b.links] : [b.links, a.links];
-  for (const link of small) if (large.has(link)) return link;
-  return null;
-}
-
 /** Follow cluster pointers to the earliest still-visible root. */
 function clusterRoot(state: GeneratorState, record: StoredItem): StoredItem | null {
   let current = record;
@@ -225,6 +218,14 @@ function clusterRoot(state: GeneratorState, record: StoredItem): StoredItem | nu
 
 function round(value: number): number {
   return Math.round(value * 10000) / 10000;
+}
+
+/**
+ * The marker hash covers translations too: a delayed translation changes the
+ * text clustering sees, so the verdict must be re-evaluated once it lands.
+ */
+function checkedHash(item: FeedItem): string {
+  return hashText(JSON.stringify([item.contentHash, item.titleZh, item.briefZh, item.bodyZh]));
 }
 
 /**
@@ -265,7 +266,7 @@ export async function runCrossSourceClusters(
     !record.duplicateOf);
   const queue = pool
     .filter((record) => !record.cluster ||
-      record.cluster.hash !== record.item.contentHash ||
+      record.cluster.hash !== checkedHash(record.item) ||
       record.cluster.config !== fingerprint)
     .sort((a, b) => b.item.publishedAt - a.item.publishedAt || a.item.id.localeCompare(b.item.id))
     .slice(0, settings.maxChecks);
@@ -281,52 +282,69 @@ export async function runCrossSourceClusters(
     return feature;
   };
 
+  // A shared link is looked up by key; building the index once avoids
+  // comparing every link pair in the pool for every queued record.
+  const linkIndex = new Map<string, StoredItem[]>();
+  for (const record of pool) {
+    for (const link of featureFor(record).links) {
+      const list = linkIndex.get(link);
+      if (list) list.push(record);
+      else linkIndex.set(link, [record]);
+    }
+  }
+
   const plan: Array<{ record: StoredItem; candidates: Candidate[] }> = [];
   const texts = new Map<string, string>();
   let overflow = 0;
   for (const record of queue) {
     const current = featureFor(record);
-    const candidates = pool
-      .filter((candidate) =>
-        candidate.item.id !== record.item.id &&
-        candidate.item.source !== record.item.source &&
-        canonicalOrder(candidate, record) < 0)
-      .map((candidate): Candidate => {
-        const other = featureFor(candidate);
-        const url = sharedLink(current, other);
-        return {
-          record: candidate,
-          lexical: url ? 1 : lexicalScore(current, other),
-          sharedUrl: url,
-        };
-      })
-      .filter((candidate) => candidate.sharedUrl || candidate.lexical >= settings.lexicalThreshold)
+    const sharedById = new Map<string, string>();
+    for (const link of current.links) {
+      for (const candidate of linkIndex.get(link) ?? []) {
+        if (candidate.item.id === record.item.id || candidate.item.source === record.item.source) continue;
+        if (canonicalOrder(candidate, record) >= 0) continue;
+        if (!sharedById.has(candidate.item.id)) sharedById.set(candidate.item.id, link);
+      }
+    }
+    const candidates: Candidate[] = [...sharedById].map(([id, sharedUrl]) => ({
+      record: state.records.get(id)!, lexical: 1, sharedUrl,
+    }));
+    for (const candidate of pool) {
+      if (candidate.item.id === record.item.id) continue;
+      if (sharedById.has(candidate.item.id)) continue;
+      if (candidate.item.source === record.item.source) continue;
+      if (canonicalOrder(candidate, record) >= 0) continue;
+      const lexical = lexicalScore(current, featureFor(candidate));
+      if (lexical >= settings.lexicalThreshold) candidates.push({ record: candidate, lexical, sharedUrl: null });
+    }
+    candidates
       // A confirmed article link is stronger evidence than a lexical guess.
       .sort((a, b) =>
         Number(Boolean(b.sharedUrl)) - Number(Boolean(a.sharedUrl)) ||
         b.lexical - a.lexical ||
-        canonicalOrder(a.record, b.record))
-      .slice(0, settings.maxCandidates)
-      .filter((candidate) => {
-        const root = clusterRoot(state, candidate.record);
-        return Boolean(root) &&
-          root!.item.id !== record.item.id &&
-          root!.item.source !== record.item.source;
-      });
-    if (!candidates.length) {
-      plan.push({ record, candidates });
+        canonicalOrder(a.record, b.record));
+    const selected = candidates.slice(0, settings.maxCandidates).filter((candidate) => {
+      const root = clusterRoot(state, candidate.record);
+      return Boolean(root) &&
+        root!.item.id !== record.item.id &&
+        root!.item.source !== record.item.source;
+    });
+    if (!selected.length) {
+      plan.push({ record, candidates: selected });
       continue;
     }
-    const needsEmbedding = candidates.some((candidate) => !candidate.sharedUrl);
+    // A shared link is self-confirming, so embeddings are wasted on it and it
+    // must not consume the per-run text budget either.
+    const needsEmbedding = !selected.some((candidate) => Boolean(candidate.sharedUrl));
     if (!needsEmbedding) {
-      plan.push({ record, candidates });
+      plan.push({ record, candidates: selected });
       continue;
     }
-    const additions = [record, ...candidates.map((candidate) => candidate.record)]
+    const additions = [record, ...selected.map((candidate) => candidate.record)]
       .filter((entry) => !texts.has(entry.item.id));
     if (texts.size + additions.length > settings.maxTexts) { overflow++; continue; }
     for (const entry of additions) texts.set(entry.item.id, embeddingText(featureFor(entry).item, settings.textChars));
-    plan.push({ record, candidates });
+    plan.push({ record, candidates: selected });
   }
   if (!plan.length) return { checked: 0, clusters: 0, skipped: overflow, dryRun: settings.dryRun, reset: false };
 
@@ -369,9 +387,10 @@ export async function runCrossSourceClusters(
       const embeddable = candidates
         .filter((candidate) => !candidate.sharedUrl)
         .sort((a, b) => canonicalOrder(a.record, b.record));
+      let missingCandidateVector = false;
       for (const candidate of embeddable) {
         const candidateVector = vectors.get(candidate.record.item.id);
-        if (!candidateVector) continue;
+        if (!candidateVector) { missingCandidateVector = true; continue; }
         const value = cosine(currentVector, candidateVector);
         if (value < settings.cosineThreshold) continue;
         const candidateRoot = clusterRoot(state, candidate.record);
@@ -382,6 +401,7 @@ export async function runCrossSourceClusters(
         similarity = value;
         break;
       }
+      if (!root && missingCandidateVector) { skipped++; continue; }
     }
 
     if (root && matched) {
@@ -405,7 +425,7 @@ export async function runCrossSourceClusters(
         if (child.cluster) child.cluster.canonicalHash = root.item.contentHash;
       }
       const marker: ClusterMarker = {
-        hash: record.item.contentHash,
+        hash: checkedHash(record.item),
         config: fingerprint,
         checkedAt: now,
         candidateId: matched.record.item.id,
@@ -423,7 +443,7 @@ export async function runCrossSourceClusters(
     if (settings.dryRun) { checked++; continue; }
     delete record.clusterOf;
     record.cluster = {
-      hash: record.item.contentHash,
+      hash: checkedHash(record.item),
       config: fingerprint,
       checkedAt: now,
       ...(candidates.length ? {

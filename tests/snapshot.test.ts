@@ -156,6 +156,32 @@ describe('snapshot feed builder', () => {
     );
     expect(second.items.map((entry) => entry.id)).toEqual(['x:old']);
   });
+
+  it('paginates tied timestamps in deterministic UTF-16 id order', () => {
+    // `localeCompare` treats 'a' as before 'B', while the cursor predicate
+    // uses raw code units ('a' = 97 > 'B' = 66). The sort must use the same
+    // order or a page-two item disappears.
+    const tied = [
+      item('x:B', 'x', NOW - 1_000),
+      item('x:a', 'x', NOW - 1_000),
+      item('x:0', 'x', NOW - 1_000),
+    ];
+    const first = buildFeedResponse(tied, query({ limit: 2 }), meta, NOW);
+    expect(first.items.map((entry) => entry.id)).toEqual(['x:a', 'x:B']);
+    expect(first.nextCursor).toBeTruthy();
+
+    const second = buildFeedResponse(
+      tied,
+      query({ limit: 2, cursor: first.nextCursor ?? undefined }),
+      meta,
+      NOW,
+    );
+    expect(second.items.map((entry) => entry.id)).toEqual(['x:0']);
+    expect(second.nextCursor).toBeNull();
+    // Every id appears exactly once across the pages.
+    expect([...first.items, ...second.items].map((entry) => entry.id).sort())
+      .toEqual(['x:0', 'x:B', 'x:a']);
+  });
 });
 
 describe('snapshot artifact', () => {

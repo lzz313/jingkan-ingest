@@ -18,6 +18,25 @@ export function formatDateTime(timestamp: number): string {
   return `${pad2(date.getMonth() + 1)}/${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }
 
+/**
+ * The server cannot know the reader's timezone, so SSR headers and the client
+ * that replaces them both use the site's canonical Beijing time.
+ */
+function toBeijingDate(timestamp: number): Date {
+  return new Date(timestamp + 8 * 60 * 60_000);
+}
+
+/** Time-only companion to formatBeijingDateTime for the compact brand row. */
+export function formatBeijingClock(timestamp: number): string {
+  const date = toBeijingDate(timestamp);
+  return `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`;
+}
+
+export function formatBeijingDateTime(timestamp: number): string {
+  const date = toBeijingDate(timestamp);
+  return `${pad2(date.getUTCMonth() + 1)}/${pad2(date.getUTCDate())} ${formatBeijingClock(timestamp)}`;
+}
+
 export function formatDayKey(timestamp: number): string {
   const date = new Date(timestamp);
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
@@ -49,8 +68,10 @@ export function timeAgo(timestamp: number, now = Date.now()): string {
   if (diff < hour) return `${Math.floor(diff / minute)} 分钟前`;
   if (diff < day) return `${Math.floor(diff / hour)} 小时前`;
   if (diff < 7 * day) return `${Math.floor(diff / day)} 天前`;
-  const date = new Date(timestamp);
-  return `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+  // Older entries show a calendar date. Use the site's Beijing day so the
+  // server-rendered text and a reader in any timezone see the same date.
+  const date = toBeijingDate(timestamp);
+  return `${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
 }
 
 export function dayLabel(timestamp: number, now = Date.now()): string {

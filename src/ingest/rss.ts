@@ -42,13 +42,31 @@ function textOf(value: XmlValue): string {
   return '';
 }
 
+function hrefOf(record: Record<string, XmlValue> | undefined): string {
+  const href = record?.['@_href'] ?? record?.['@_url'];
+  return typeof href === 'string' ? href.trim() : '';
+}
+
+/**
+ * Atom entries commonly carry several `<link>` elements (alternate, self,
+ * replies...). Pick the alternate link instead of joining every href into one
+ * invalid URL.
+ */
 function linkOf(value: XmlValue): string {
   if (typeof value === 'string') return value.trim();
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    const record = value as Record<string, XmlValue>;
-    const href = record['@_href'] ?? record['@_url'];
-    if (typeof href === 'string') return href.trim();
+  if (Array.isArray(value)) {
+    const objects = value.filter(
+      (entry): entry is Record<string, XmlValue> =>
+        Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry),
+    );
+    const preferred = objects.find((entry) => entry['@_rel'] === 'alternate') ??
+      objects.find((entry) => entry['@_rel'] === undefined) ??
+      objects[0];
+    const href = hrefOf(preferred) || objects.map(hrefOf).find(Boolean);
+    if (href) return href;
+    return value.find((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)?.trim() ?? '';
   }
+  if (value && typeof value === 'object') return hrefOf(value as Record<string, XmlValue>) || textOf(value);
   return textOf(value);
 }
 

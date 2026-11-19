@@ -10,6 +10,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Discard a failed response body so the connection can be reused. */
+async function discard(response: Response): Promise<void> {
+  try { await response.body?.cancel(); } catch { /* A consumed body is already released. */ }
+}
+
 export async function fetchWithRetry(
   url: string,
   init: RequestInit = {},
@@ -20,33 +25,35 @@ export async function fetchWithRetry(
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const headers = new Headers(init.headers);
-      for (const [key, value] of Object.entries(options.headers ?? {})) {
-        headers.set(key, value);
-      }
-      if (!headers.has('user-agent')) headers.set('user-agent', DEFAULT_USER_AGENT);
-      if (!headers.has('accept')) headers.set('accept', '*/*');
+    if (attempt > 0) await sleep(900 * attempt);
+    const headers = new Headers(init.headers);
+    for (const [key, value] of Object.entries(options.headers ?? {})) {
+      headers.set(key, value);
+    }
+    if (!headers.has('user-agent')) headers.set('user-agent', DEFAULT_USER_AGENT);
+    if (!headers.has('accept')) headers.set('accept', '*/*');
 
-      const response = await fetch(url, {
+    let response: Response;
+    try {
+      response = await fetch(url, {
         ...init,
         headers,
         signal: AbortSignal.timeout(timeoutMs),
       });
-
-      if (response.ok) return response;
-
-      const retryable = response.status === 429 || response.status >= 500;
-      if (!retryable || attempt === retries) {
-        throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
-      }
-      lastError = new Error(`HTTP ${response.status} for ${url}`);
     } catch (error) {
       lastError = error;
-      if (attempt === retries) break;
+      continue;
     }
 
-    await sleep(900 * (attempt + 1));
+    if (response.ok) return response;
+
+    const retryable = response.status === 429 || response.status >= 500;
+    await discard(response);
+    const error = new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
+    // A 403/404 (or any other non-retryable 4xx) will not change on a retry;
+    // fail fast instead of sleeping through the remaining attempts.
+    if (!retryable) throw error;
+    lastError = error;
   }
 
   throw lastError instanceof Error ? lastError : new Error(String(lastError));

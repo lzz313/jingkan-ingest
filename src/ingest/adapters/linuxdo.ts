@@ -9,10 +9,15 @@ const RSS_URL = 'https://linux.do/latest.rss';
 // descriptions, post counts and images are preserved.
 const READER_URL = 'https://r.jina.ai/https://linux.do/latest.rss';
 
+// Discourse canonical URLs are `/t/<slug>/<id>`; the older reader emitted
+// `/t/topic/<id>`, which is just one possible slug.
+const TOPIC_URL = /https:\/\/linux\.do\/t\/(?:[^/\s)]+\/)?\d+/;
+const TOPIC_ID = /\/t\/(?:[^/\s]+?\/)?(\d+)/;
+
 export function parseReaderMarkdown(markdown: string): NormalizedItem[] {
   const items: NormalizedItem[] = [];
   for (const section of markdown.split(/\n### \[/).slice(1)) {
-    const heading = section.match(/^([^\n]+?)\]\((https:\/\/linux\.do\/t\/topic\/\d+)\)/);
+    const heading = section.match(new RegExp(`^([^\\n]+?)\\]\\((${TOPIC_URL.source})\\)`));
     if (!heading) continue;
     const title = heading[1]!.trim();
     const url = heading[2]!;
@@ -22,7 +27,7 @@ export function parseReaderMarkdown(markdown: string): NormalizedItem[] {
     const publishedAt = dateMatch ? Date.parse(dateMatch[1]!) : Date.now();
     items.push({
       source: 'linuxdo',
-      externalId: url.match(/\/t\/topic\/(\d+)/)?.[1] ?? url,
+      externalId: url.match(TOPIC_ID)?.[1] ?? url,
       title,
       url,
       publishedAt: Number.isFinite(publishedAt) ? publishedAt : Date.now(),
@@ -43,8 +48,12 @@ async function fetchViaReader(): Promise<NormalizedItem[]> {
     timeoutMs: 30_000,
   });
   if (body.includes('<rss')) return mapRssItems(body);
-  // Older Reader responses are Markdown; keep a conservative fallback.
-  return parseReaderMarkdown(body);
+  // Older Reader responses are Markdown; keep a conservative fallback. Zero
+  // items means the reader answered with a challenge or error page, which
+  // must surface as a source failure instead of a silent empty success.
+  const items = parseReaderMarkdown(body);
+  if (items.length === 0) throw new Error('LINUX DO Reader returned no usable topics');
+  return items;
 }
 
 function mapRssItems(xml: string): NormalizedItem[] {
@@ -59,12 +68,14 @@ function mapRssItems(xml: string): NormalizedItem[] {
       );
       const plain = plainText
         .replace(/阅读完整话题|Read full topic/gi, '')
-        .replace(/\d+\s*(?:个帖子|posts?)\s*[-–—]\s*\d+\s*(?:位参与者|participants?)/gi, '')
+        // Discourse renders the footer as "3 posts - 2 participants"; anchor on
+        // that exact shape so an en dash in the prose is not eaten.
+        .replace(/\d+\s*(?:个帖子|posts?)\s*-\s*\d+\s*(?:位参与者|participants?)/gi, '')
         .replace(/\d+\s*(?:个帖子|posts?)/gi, '')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
       const externalId =
-        item.link.match(/\/t\/topic\/(\d+)/)?.[1] ||
+        item.link.match(TOPIC_ID)?.[1] ||
         item.guid.replace(/^linux\.do-topic-/, '') ||
         item.link;
 

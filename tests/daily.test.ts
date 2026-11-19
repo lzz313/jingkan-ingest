@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { buildDailyDigests, notifyIndexNow, publishDailyDigests } from '../src/ingest/daily';
+import { buildDailyDigests, dailyQuality, notifyIndexNow, publishDailyDigests } from '../src/ingest/daily';
 import { CLUSTER_DEFAULTS, DEDUPE_DEFAULTS } from '../src/ingest/env';
 import { isDailyDigest } from '../src/shared/daily';
 import { SOURCE_IDS, type FeedItem, type SourceId } from '../src/shared/types';
@@ -49,6 +49,36 @@ it('prefers quality over rotation while keeping diversity as a constraint', () =
   expect(new Set(digest!.entries.map((entry) => entry.source))).toEqual(new Set(['hn', 'v2ex', 'simonw']));
   expect(digest!.entries[0]!.id).toBe('hn:1');
   expect(digest!.entries[0]!.reason).toContain('质量优先');
+});
+
+it('skips days whose only items fail the hot gate', () => {
+  // A joke-only X batch is hot-ineligible and produces no entries. The
+  // archive endpoint rejects an empty digest with 400, so publishing it at
+  // all would just burn a doomed request.
+  const items = [
+    { ...item('x', 1), hotEligible: false },
+    { ...item('x', 2), hotEligible: false },
+  ];
+  expect(buildDailyDigests(items, now)).toEqual([]);
+});
+
+it('does not count the Tech Twitter aggregator page as an external article', () => {
+  const base = { ...item('x', 1), title: 'Short post', body: 'Short body' };
+  const plain = dailyQuality({ ...base, extra: {} });
+  expect(dailyQuality({ ...base, extra: { canonicalUrl: 'https://www.techtwitter.com/tweet/1' } })).toBe(plain);
+  expect(dailyQuality({ ...base, extra: { canonicalUrl: 'https://example.com/article' } })).toBe(plain + 5);
+});
+
+it('summarizes an X post with its translated body', () => {
+  const items = [{
+    ...item('x', 1),
+    body: 'An English post about compilers.',
+    bodyZh: '一篇关于编译器的中文正文。',
+    brief: 'English brief',
+    briefZh: '中文摘要',
+  }];
+  const [digest] = buildDailyDigests(items, now);
+  expect(digest!.entries[0]!.summary).toBe('一篇关于编译器的中文正文。');
 });
 
 it('uses Beijing calendar days and preserves repository and product names', () => {

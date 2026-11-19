@@ -20,7 +20,7 @@ export function parseSimonWFeed(xml: string, now = Date.now()): NormalizedItem[]
   const items: NormalizedItem[] = [];
   for (const entry of entries) {
     if (!entry.title || !entry.link || !isAiRelatedSimonWEntry(entry.categories)) continue;
-    const publishedAt = parseRssDate(entry.pubDate);
+    const publishedAt = parseRssDate(entry.pubDate, Number.NaN);
     if (!isWithinRecentWindow(publishedAt, now)) continue;
 
     const plain = stripHtml(entry.description);

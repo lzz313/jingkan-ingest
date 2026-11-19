@@ -9,6 +9,57 @@ export interface DailyEntry {
 export interface DailyDigest {
   version: 1; day: string; total: number; sources: Partial<Record<SourceId, number>>; entries: DailyEntry[];
 }
+export interface DailyArchivePreview {
+  total?: number;
+  sourceCount?: number;
+  entryCount?: number;
+  preview?: string;
+}
+
+export function clipDailyText(text: string, maxLength: number): string {
+  const cleaned = text.replace(/\s+/g, ' ').trim();
+  // Slice code points, not UTF-16 code units: cutting between the two halves
+  // of an emoji surrogate pair produces an invalid string in metadata and XML.
+  const characters = Array.from(cleaned);
+  if (characters.length <= maxLength) return cleaned;
+  return `${characters.slice(0, Math.max(1, maxLength - 1)).join('').trimEnd()}…`;
+}
+
+/** Compact preview stored in R2 customMetadata so archive indexes need no extra object reads. */
+export function buildDailyArchiveMetadata(digest: DailyDigest): Record<string, string> {
+  const headlines: string[] = [];
+  let length = 0;
+  for (const entry of digest.entries) {
+    const title = clipDailyText(entry.title, 34);
+    if (!title || headlines.includes(title)) continue;
+    const addition = (headlines.length ? 3 : 0) + title.length;
+    if (headlines.length >= 3 || (headlines.length > 0 && length + addition > 110)) break;
+    headlines.push(title);
+    length += addition;
+  }
+  return {
+    total: String(digest.total),
+    sources: String(Object.keys(digest.sources).length),
+    entries: String(digest.entries.length),
+    ...(headlines.length ? { preview: headlines.join(' · ') } : {}),
+  };
+}
+
+export function parseDailyArchiveMetadata(metadata?: Record<string, string>): DailyArchivePreview {
+  if (!metadata) return {};
+  const parseCount = (value: string | undefined): number | undefined => {
+    if (!value || !/^\d+$/.test(value)) return undefined;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+  };
+  const preview = metadata.preview?.trim();
+  return {
+    total: parseCount(metadata.total),
+    sourceCount: parseCount(metadata.sources),
+    entryCount: parseCount(metadata.entries),
+    ...(preview ? { preview } : {}),
+  };
+}
 export function isDailyDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const timestamp = Date.parse(value + 'T00:00:00Z');

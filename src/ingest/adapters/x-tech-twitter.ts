@@ -93,6 +93,23 @@ function cleanHandle(value: string | undefined): string | undefined {
   return handle && /^[a-z0-9_]+$/i.test(handle) ? handle : undefined;
 }
 
+/** Non-user paths like `x.com/i/status/...` must not become an author handle. */
+const RESERVED_X_PATHS = new Set(['i', 'status', 'home', 'explore', 'search', 'intent', 'share']);
+
+function handleFromXUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^(?:www\.|mobile\.)/, '');
+    if (host !== 'x.com' && host !== 'twitter.com') return undefined;
+    const first = parsed.pathname.split('/').filter(Boolean)[0];
+    if (!first || RESERVED_X_PATHS.has(first.toLowerCase())) return undefined;
+    return cleanHandle(first);
+  } catch {
+    return undefined;
+  }
+}
+
 function parseTime(value: string | undefined): number | null {
   if (!value) return null;
   const parsed = Date.parse(value);
@@ -159,7 +176,9 @@ async function enrichFromSyndication(
     `&lang=en&token=${token}`;
   try {
     const result = await fetchJson<SyndicationTweet>(endpoint, {
-      retries: 0,
+      // One retry covers a transient network blip; a missing tweet 404s
+      // immediately and is not retried.
+      retries: 1,
       timeoutMs: 12_000,
     });
     const text = cleanText(
@@ -200,7 +219,10 @@ function toItem(
   const title = post.headline || firstSentences(body, 110);
   if (!title || !body) return null;
 
-  const url = normalizedXUrl(post.id, enriched.handle);
+  // Syndication supplies the real screen name; when it is unavailable the
+  // aggregator's status URL still identifies the author.
+  const handle = enriched.handle ?? handleFromXUrl(post.xUrl);
+  const url = normalizedXUrl(post.id, handle);
   const metrics: ItemMetrics = {};
   if (enriched.likes !== undefined) metrics.likes = enriched.likes;
   if (enriched.replies !== undefined) metrics.replies = enriched.replies;
@@ -209,7 +231,7 @@ function toItem(
   const corePost: CorePost = {
     url,
     label: title,
-    handle: enriched.handle,
+    handle,
     likes: enriched.likes,
     replies: enriched.replies,
   };
@@ -221,8 +243,8 @@ function toItem(
     body: body.slice(0, 20_000),
     brief: post.summary || firstSentences(body, 220),
     url,
-    author: enriched.displayName || enriched.handle,
-    authorHandle: enriched.handle,
+    author: enriched.displayName || handle,
+    authorHandle: handle,
     publishedAt: enriched.publishedAt ?? post.postedAt,
     metrics,
     images: enriched.images,
@@ -242,19 +264,32 @@ function toItem(
   };
 }
 
-export async function fetchTechTwitterX(
-  now: number,
-  excludedIds: ReadonlySet<string>,
-): Promise<NormalizedItem[]> {
+/** Fetch the trending list without touching syndication, so it can race xbangdan. */
+export async function fetchTechTwitterPosts(now: number): Promise<TechTwitterPost[]> {
   const payload = await fetchJson<TechTwitterPayload>(TECH_TWITTER_TRENDING_URL, {
     headers: { accept: 'application/json' },
     retries: 1,
   });
-  const posts = parseTechPosts(payload, now)
+  return parseTechPosts(payload, now);
+}
+
+/** Enrich the trending posts that xbangdan did not already cover. */
+export async function enrichTechTwitterX(
+  posts: TechTwitterPost[],
+  excludedIds: ReadonlySet<string>,
+): Promise<NormalizedItem[]> {
+  const selected = posts
     .filter((post) => !excludedIds.has(post.id))
     .slice(0, MAX_TECH_TWITTER_ITEMS);
-  const enriched = await mapLimit(posts, 4, enrichFromSyndication);
-  return posts
+  const enriched = await mapLimit(selected, 4, enrichFromSyndication);
+  return selected
     .map((post, index) => toItem(post, enriched[index] ?? { images: [] }))
     .filter((item): item is NormalizedItem => item !== null);
+}
+
+export async function fetchTechTwitterX(
+  now: number,
+  excludedIds: ReadonlySet<string>,
+): Promise<NormalizedItem[]> {
+  return enrichTechTwitterX(await fetchTechTwitterPosts(now), excludedIds);
 }

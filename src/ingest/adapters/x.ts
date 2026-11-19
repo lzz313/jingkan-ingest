@@ -3,7 +3,7 @@ import type { CorePost, ItemMetrics, NormalizedItem, SourceId } from '../../shar
 import { firstSentences, hashText, stripHtml } from '../../shared/html';
 import { parseMetricNumber, snowflakeToMs } from '../../shared/numbers';
 import { fetchJson, fetchText } from '../fetch';
-import { fetchTechTwitterX } from './x-tech-twitter';
+import { enrichTechTwitterX, fetchTechTwitterPosts } from './x-tech-twitter';
 
 const POSTS_URL = 'https://xbangdan.com/posts/';
 const HOT_URL = 'https://xbangdan.com/hot.json';
@@ -161,11 +161,11 @@ function parsePostsHtml(html: string): Map<string, Candidate> {
 }
 
 function addHotEntries(candidates: Map<string, Candidate>, payload: HotPayload): void {
-  const seen = new Set<string>();
+  // The same post can appear in both rankings with complementary fields;
+  // merge them instead of letting the first list win.
   for (const entry of [...(payload.rate ?? []), ...(payload.views ?? [])]) {
     const id = entry.id?.trim();
-    if (!id || !/^\d+$/.test(id) || seen.has(id)) continue;
-    seen.add(id);
+    if (!id || !/^\d+$/.test(id)) continue;
 
     const next: Candidate = {
       id,
@@ -244,11 +244,14 @@ function toItem(candidate: Candidate, now: number): NormalizedItem | null {
 }
 
 export async function fetchX(now = Date.now()): Promise<NormalizedItem[]> {
-  const [postsResult, hotResult] = await Promise.allSettled([
+  // The Tech Twitter list races the xbangdan requests; only its syndication
+  // enrichment has to wait for the xbangdan ids to be known.
+  const [postsResult, hotResult, techResult] = await Promise.allSettled([
     fetchText(POSTS_URL, {
       headers: { accept: 'text/html,application/xhtml+xml' },
     }),
     fetchJson<HotPayload>(HOT_URL),
+    fetchTechTwitterPosts(now),
   ]);
 
   const candidates = new Map<string, Candidate>();
@@ -285,13 +288,19 @@ export async function fetchX(now = Date.now()): Promise<NormalizedItem[]> {
 
   let techTwitterItems: NormalizedItem[] = [];
   let techTwitterError = '';
-  try {
-    techTwitterItems = await fetchTechTwitterX(
-      now,
-      new Set(xbangdanItems.map((item) => item.externalId)),
-    );
-  } catch (error) {
-    techTwitterError = error instanceof Error ? error.message : String(error);
+  if (techResult.status === 'rejected') {
+    techTwitterError = techResult.reason instanceof Error
+      ? techResult.reason.message
+      : String(techResult.reason);
+  } else {
+    try {
+      techTwitterItems = await enrichTechTwitterX(
+        techResult.value,
+        new Set(xbangdanItems.map((item) => item.externalId)),
+      );
+    } catch (error) {
+      techTwitterError = error instanceof Error ? error.message : String(error);
+    }
   }
 
   const items = [...xbangdanItems, ...techTwitterItems].sort(

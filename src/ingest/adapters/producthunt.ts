@@ -23,7 +23,14 @@ export function productHuntTagline(content: string): string {
 }
 
 function externalIdOf(guid: string, link: string): string {
-  return guid.match(/\/Post\/(\d+)/i)?.[1] || link.split('/').filter(Boolean).at(-1) || '';
+  // `tag:www.producthunt.com,2005:Post/1308353`
+  const postId = guid.match(/(?:^|[:/])Post\/(\d+)/i)?.[1];
+  if (postId) return postId;
+  try {
+    return new URL(link).pathname.split('/').filter(Boolean).at(-1) ?? '';
+  } catch {
+    return '';
+  }
 }
 
 export function parseProductHuntFeed(xml: string, now = Date.now()): NormalizedItem[] {
@@ -33,7 +40,7 @@ export function parseProductHuntFeed(xml: string, now = Date.now()): NormalizedI
   const items: NormalizedItem[] = [];
   for (const entry of entries) {
     if (!entry.title || !entry.link) continue;
-    const publishedAt = parseRssDate(entry.pubDate);
+    const publishedAt = parseRssDate(entry.pubDate, Number.NaN);
     if (!isWithinRecentWindow(publishedAt, now)) continue;
 
     const tagline = productHuntTagline(entry.description);

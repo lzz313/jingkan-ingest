@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { beijingDate } from '../shared/daily';
 import type { FeedItem, TranslateField } from '../shared/types';
 import { itemNeedsTranslation } from '../shared/translation';
 import type { IngestConfig } from './env';
@@ -46,21 +47,42 @@ export function selectBacklog(items: FeedItem[], limit: number): FeedItem[] {
   }
   return selected;
 }
-async function enrich(config: IngestConfig, state: GeneratorState, translationLimit = 60): Promise<void> {
+/**
+ * Moderate one batch. A batch-level failure may be caused by a single
+ * un-moderatable item, so split it in half and retry down to one item instead
+ * of abandoning every later batch in the run.
+ */
+async function moderateBatch(config: IngestConfig, state: GeneratorState, items: FeedItem[]): Promise<number> {
+  if (!items.length) return 0;
+  try {
+    const result = await post<{ moderation: Array<{ id: string; contentHash: string | null; hide: boolean; reason: string | null }> }>(config, '/api/admin/enrich', { kind: 'moderate', items });
+    let applied = 0;
+    for (const decision of result.moderation ?? []) {
+      const record = state.records.get(decision.id);
+      if (record?.item.contentHash !== decision.contentHash || typeof decision.hide !== 'boolean') continue;
+      record.moderation = decision.hide ? 'hide' : 'keep'; record.aiReason = decision.reason ?? undefined;
+      applied++;
+    }
+    console.log(`[publish] moderated ${result.moderation?.length ?? 0} candidates`);
+    return applied;
+  } catch (error) {
+    if (items.length === 1) {
+      console.warn(`[publish] moderation skipped ${items[0]!.id}:`, String(error));
+      return 0;
+    }
+    const middle = Math.ceil(items.length / 2);
+    return await moderateBatch(config, state, items.slice(0, middle)) +
+      await moderateBatch(config, state, items.slice(middle));
+  }
+}
+async function enrich(config: IngestConfig, state: GeneratorState, translationLimit = 60): Promise<number> {
+  let applied = 0;
   const records = enrichmentRecords(state).sort((a, b) => b.item.publishedAt - a.item.publishedAt);
   const pending = selectBacklog(records.filter((record) => record.moderation === 'pending').map((r) => r.item), 60);
   for (let offset = 0; offset < pending.length; offset += 20) {
-    try {
-      const result = await post<{ moderation: Array<{ id: string; contentHash: string | null; hide: boolean; reason: string | null }> }>(config, '/api/admin/enrich', { kind: 'moderate', items: pending.slice(offset, offset + 20) });
-      for (const decision of result.moderation) {
-        const record = state.records.get(decision.id);
-        if (record?.item.contentHash !== decision.contentHash || typeof decision.hide !== 'boolean') continue;
-        record.moderation = decision.hide ? 'hide' : 'keep'; record.aiReason = decision.reason ?? undefined;
-      }
-      console.log(`[publish] moderated ${result.moderation.length} candidates`);
-    } catch (error) { console.warn('[publish] moderation pending:', String(error)); break; }
+    applied += await moderateBatch(config, state, pending.slice(offset, offset + 20));
   }
-  if (!config.prewarmTranslations) return;
+  if (!config.prewarmTranslations) return applied;
   // Merged copies are not shown; skip their translation budget until they
   // are released (a released copy is picked up again on the next run).
   const visible = records
@@ -76,11 +98,13 @@ async function enrich(config: IngestConfig, state: GeneratorState, translationLi
       try {
         const result = await post<{ entries: EnrichmentEntry[] }>(config, '/api/admin/enrich', { kind: 'translate', field: task.field, items: task.items.slice(offset, offset + 10) });
         applyEvent(state, { kind: 'enrichment', entries: result.entries, createdAt: Date.now() });
+        applied += result.entries.length;
         console.log(`[publish] ${task.field}: ${result.entries.length} translations`);
         if (!result.entries.length) break;
       } catch (error) { console.warn(`[publish] ${task.field} pending:`, String(error)); break; }
     }
   }
+  return applied;
 }
 export async function runPublisher(config: IngestConfig, options: PublishOptions = {}): Promise<void> {
   const owner = `${process.env.GITHUB_RUN_ID ?? 'local'}:${process.env.GITHUB_RUN_ATTEMPT ?? '1'}:${randomUUID()}`;
@@ -90,60 +114,97 @@ export async function runPublisher(config: IngestConfig, options: PublishOptions
   let renewal: Promise<void> = Promise.resolve();
   const timer = setInterval(() => {
     renewal = renewal.then(async () => {
-      try { await post(config, '/api/admin/publisher', { action: 'renew', token }); }
-      catch (error) { lostLease = true; console.error('[publish] lease renewal failed', String(error)); }
+      try {
+        await post(config, '/api/admin/publisher', { action: 'renew', token });
+        // A transient outage is not a lost lease: keep publishing unless the
+        // Worker explicitly rejected this token.
+        lostLease = false;
+      } catch (error) {
+        const message = String(error);
+        if (/\b409\b/.test(message)) { lostLease = true; console.error('[publish] lease lost', message); }
+        else console.warn('[publish] lease renewal deferred:', message);
+      }
     });
   }, 60000);
   try {
     const base = await readBase(config);
+    const bootstrapped = !base.generatorStateParts;
     const records = base.generatorStateParts
       ? await readBaseRecords<StoredItem>(config, base, base.generatorStateParts)
       : bootstrapRecords(await readBaseItems(config, base));
     const state: GeneratorState = { records: new Map(records.map((r) => [r.item.id, r])), sources: base.sources,
-      lastUpdated: base.lastUpdated, lastRefreshAt: Math.max(base.lastRefreshAt, claimed.lastRefreshAt), lastIngestAttemptAt: base.lastIngestAttemptAt ?? 0 };
-    console.log(`[publish] loaded ${records.length} records from ${base.generatorStateParts ? 'private state' : 'public R2 bootstrap'}`);
+      lastUpdated: base.lastUpdated, lastRefreshAt: Math.max(base.lastRefreshAt, claimed.lastRefreshAt), lastIngestAttemptAt: base.lastIngestAttemptAt ?? 0,
+      enrichmentCleanupCursor: base.enrichmentCleanupCursor ?? null };
+    console.log(`[publish] loaded ${records.length} records from ${bootstrapped ? 'public R2 bootstrap' : 'private state'}`);
     const events = options.repackOnly ? [] : await pendingEvents(config);
+    let stateMutated = events.length > 0;
     for (const { event } of events) applyEvent(state, event);
     const now = Date.now();
     const shouldFetch = !options.repackOnly && (options.forceFetch || claimed.lastRefreshAt > state.lastIngestAttemptAt || (isSourceWindow(now) && now - state.lastIngestAttemptAt >= 600000));
     if (shouldFetch) {
       state.lastIngestAttemptAt = now;
       const fetched = await fetchSources(now);
-      mergeItems(state, fetched.items, now); updateSources(state, fetched.sourceStatus, now);
+      if (mergeItems(state, fetched.items, now) > 0) stateMutated = true;
+      updateSources(state, fetched.sourceStatus, now);
     }
     const imageRepairs = deduplicateStateImages(state);
-    if (imageRepairs) console.log(`[publish] deduplicated images in ${imageRepairs} records`);
+    if (imageRepairs) { stateMutated = true; console.log(`[publish] deduplicated images in ${imageRepairs} records`); }
     if (!options.repackOnly) {
+      const retained = state.records.size;
       pruneState(state, now - STATE_RETENTION_MS);
-      console.log('[publish] policy reconciliation:', JSON.stringify(reconcileState(state)));
+      if (state.records.size !== retained) stateMutated = true;
+      const reconciled = reconcileState(state);
+      if (reconciled.hidden || reconciled.translationsReset) stateMutated = true;
+      console.log('[publish] policy reconciliation:', JSON.stringify(reconciled));
       const released = reconcileDuplicatePointers(state);
-      if (released) console.log(`[publish] released ${released} stale duplicate pointers`);
+      if (released) { stateMutated = true; console.log(`[publish] released ${released} stale duplicate pointers`); }
       try {
         const dedupe = await runNodeSeekDedupe(config, state, now);
+        if (!dedupe.dryRun && (dedupe.checked || dedupe.reset)) stateMutated = true;
         if (dedupe.reset) console.log('[publish] duplicate markers reset');
         else if (dedupe.checked) console.log(`[publish] dedupe checked ${dedupe.checked}, ${dedupe.dryRun ? 'would hide' : 'hid'} ${dedupe.duplicates}, deferred ${dedupe.skipped}`);
       } catch (error) { console.warn('[publish] dedupe deferred:', String(error)); }
-      await enrich(config, state, options.translationLimit);
+      if (await enrich(config, state, options.translationLimit) > 0) stateMutated = true;
       // Moderation may hide a canonical, so release its duplicates before the snapshot is built.
       const afterModeration = reconcileDuplicatePointers(state);
-      if (afterModeration) console.log(`[publish] released ${afterModeration} duplicates after moderation`);
+      if (afterModeration) { stateMutated = true; console.log(`[publish] released ${afterModeration} duplicates after moderation`); }
       // Clustering runs after translation so cross-language text can match, and
       // after moderation so it only ever merges stories that will be published.
       const unclustered = reconcileClusterPointers(state);
-      if (unclustered) console.log(`[publish] released ${unclustered} stale cluster pointers`);
+      if (unclustered) { stateMutated = true; console.log(`[publish] released ${unclustered} stale cluster pointers`); }
       try {
         const cluster = await runCrossSourceClusters(config, state, now);
+        if (!cluster.dryRun && (cluster.checked || cluster.reset)) stateMutated = true;
         if (cluster.reset) console.log('[publish] cluster markers reset');
         else if (cluster.checked) console.log(`[publish] cluster checked ${cluster.checked}, ${cluster.dryRun ? 'would merge' : 'merged'} ${cluster.clusters}, deferred ${cluster.skipped}`);
       } catch (error) { console.warn('[publish] clustering deferred:', String(error)); }
     }
+    // Overnight and off-schedule runs usually have nothing new: keep the
+    // active snapshot instead of rewriting R2 and busting Worker caches.
+    if (!options.repackOnly && !bootstrapped && !shouldFetch && events.length === 0 && !stateMutated &&
+      base && beijingDate(now) === beijingDate(base.generatedAt) && now - base.generatedAt < 3_600_000) {
+      console.log('[publish] no-op; snapshot is current');
+      return;
+    }
+    // `feed/enrichment/` is only a cache, so a bounded sweep before publishing
+    // is safe; its resume cursor rides along in the new manifest so a prefix
+    // larger than one run's page budget eventually drains.
+    try {
+      let cleanupCursor: string | null = state.enrichmentCleanupCursor ?? null;
+      for (let page = 0; page < 10; page++) {
+        const result = await post<{ cursor: string | null }>(config, '/api/admin/events/cleanup', { prefix: 'feed/enrichment/', cursor: cleanupCursor });
+        cleanupCursor = result.cursor;
+        if (!cleanupCursor) break;
+      }
+      state.enrichmentCleanupCursor = cleanupCursor;
+    } catch (error) { console.warn('[publish] enrichment cleanup deferred:', String(error)); }
     const items = visibleItems(state, {
       trustedXHandles: config.xTrustedHandles,
       hotGateEnabled: config.xHotGate !== false,
     });
     const built = buildSnapshot(items, {
       dataVersion: base.dataVersion + 1, lastUpdated: state.lastUpdated, lastRefreshAt: state.lastRefreshAt,
-      lastIngestAttemptAt: state.lastIngestAttemptAt, sources: state.sources,
+      lastIngestAttemptAt: state.lastIngestAttemptAt, sources: state.sources, enrichmentCleanupCursor: state.enrichmentCleanupCursor,
       removed: reconcileRemovedMap(base.removed ?? {}, state, now), processedEvents: events.map((event) => event.key),
     }, Date.now(), undefined, [...state.records.values()]);
     await renewal;
@@ -153,20 +214,22 @@ export async function runPublisher(config: IngestConfig, options: PublishOptions
     await uploadSnapshot(config, built, token, base.snapshotId);
     console.log(`[publish] activated ${built.manifest.snapshotId}; source lastUpdated=${new Date(state.lastUpdated).toISOString()}`);
     if (!options.repackOnly) {
-      const archived = await publishDailyDigests(config, items, token, built.manifest.snapshotId);
-      console.log(`[publish] updated ${archived} daily archives`);
+      // A daily-archive failure must never skip acknowledging the events that
+      // this snapshot already covers, nor the retention sweep below.
+      try {
+        const archived = await publishDailyDigests(config, items, token, built.manifest.snapshotId);
+        console.log(`[publish] updated ${archived} daily archives`);
+      } catch (error) { console.error('[publish] daily archives deferred:', String(error)); }
     }
     for (let offset = 0; offset < events.length; offset += 100) {
       await post(config, '/api/admin/events/ack', { keys: events.slice(offset, offset + 100).map((event) => event.key), snapshotId: built.manifest.snapshotId, token });
     }
     try {
-      for (const prefix of ['feed/events/', 'feed/enrichment/']) {
-        let cursor: string | null = null;
-        for (let page = 0; page < 10; page++) {
-          const result: { cursor: string | null } = await post(config, '/api/admin/events/cleanup', { prefix, cursor });
-          cursor = result.cursor;
-          if (!cursor) break;
-        }
+      let cursor: string | null = null;
+      for (let page = 0; page < 10; page++) {
+        const result: { cursor: string | null } = await post(config, '/api/admin/events/cleanup', { prefix: 'feed/events/', cursor });
+        cursor = result.cursor;
+        if (!cursor) break;
       }
     } catch (error) { console.warn('[publish] retention cleanup deferred:', String(error)); }
   } finally {

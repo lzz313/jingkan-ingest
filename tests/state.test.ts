@@ -143,6 +143,111 @@ describe('events, retention and source freshness', () => {
   });
 });
 
+describe('operator maintenance overrides', () => {
+  it('keeps an operator unhide through policy repair and later fetches', () => {
+    const s = state();
+    mergeItems(s, [post({ source: 'v2ex', extra: { node: 'programmer' } })], now);
+    s.records.get('v2ex:1')!.moderation = 'keep';
+    applyEvent(s, { kind: 'maintenance', patches: [{ id: 'v2ex:1', hidden: false }], createdAt: now });
+    expect(s.records.get('v2ex:1')!.manualHidden).toBe(true);
+    expect(visibleItems(s).map((item) => item.id)).toEqual(['v2ex:1']);
+
+    // The node later becomes a promotion; the operator decision still wins.
+    s.records.get('v2ex:1')!.item.extra = { node: 'promotions', nodeTitle: '推广' };
+    expect(reconcileState(s).hidden).toBe(0);
+    expect(visibleItems(s).map((item) => item.id)).toEqual(['v2ex:1']);
+
+    mergeItems(s, [post({ source: 'v2ex', extra: { node: 'promotions', nodeTitle: '推广' } })], now + 3600000);
+    expect(s.records.get('v2ex:1')!.item.hidden).toBe(false);
+    expect(s.records.get('v2ex:1')!.manualHidden).toBe(true);
+    expect(visibleItems(s).map((item) => item.id)).toEqual(['v2ex:1']);
+  });
+
+  it('keeps an operator-curated image list across later fetches', () => {
+    const s = state();
+    mergeItems(s, [post({ images: ['https://example.com/source.png'] })], now);
+    applyEvent(s, { kind: 'maintenance', patches: [{ id: 'hn:1', images: [] }], createdAt: now });
+    expect(s.records.get('hn:1')!.item.images).toEqual([]);
+    expect(s.records.get('hn:1')!.manualImages).toBe(true);
+
+    mergeItems(s, [post({ images: ['https://example.com/source.png'] })], now + 3600000);
+    expect(s.records.get('hn:1')!.item.images).toEqual([]);
+    expect(s.records.get('hn:1')!.manualImages).toBe(true);
+  });
+});
+
+describe('enrichment downgrade protection', () => {
+  it('never downgrades a syndication-enriched X record to a fallback card', () => {
+    const s = state();
+    mergeItems(s, [post({
+      source: 'x',
+      title: 'Claude can now use tools',
+      body: 'The full syndicated post body.',
+      author: 'Claude',
+      authorHandle: 'claudeai',
+      metrics: { likes: 10, replies: 2 },
+      images: ['https://pbs.twimg.com/media/a.jpg'],
+      extra: { provider: 'tech-twitter', statsSource: 'x-syndication' },
+    })], now);
+    s.records.get('x:1')!.item.titleZh = '克劳德现在可以使用工具';
+    s.records.get('x:1')!.item.bodyZh = '完整的中文正文。';
+
+    mergeItems(s, [post({
+      source: 'x',
+      title: 'Claude can now use tools',
+      body: 'Short aggregator summary.',
+      metrics: { qualityScore: 9 },
+      images: [],
+      contentHash: 'degraded-hash',
+      extra: { provider: 'tech-twitter', statsSource: 'tech-twitter' },
+    })], now + 3600000);
+
+    expect(s.records.get('x:1')!.item).toMatchObject({
+      body: 'The full syndicated post body.',
+      titleZh: '克劳德现在可以使用工具',
+      bodyZh: '完整的中文正文。',
+      author: 'Claude',
+      authorHandle: 'claudeai',
+      metrics: { likes: 10, replies: 2 },
+      images: ['https://pbs.twimg.com/media/a.jpg'],
+    });
+  });
+
+  it('keeps full RSS text when a Jina proxy fallback returns less', () => {
+    const s = state();
+    mergeItems(s, [post({ source: 'simonw', body: 'The full post body from the feed.', extra: { timeSource: 'rss' } })], now);
+    mergeItems(s, [post({
+      source: 'simonw', body: 'Short proxy text.', contentHash: 'proxy-hash',
+      extra: { timeSource: 'rss', proxy: 'jina' },
+    })], now + 3600000);
+
+    expect(s.records.get('simonw:1')!.item.body).toBe('The full post body from the feed.');
+  });
+});
+
+describe('brief validation', () => {
+  it('rejects model meta-notes when storing or repairing a brief', () => {
+    const s = state();
+    mergeItems(s, [post({ source: 'simonw' })], now);
+    const record = s.records.get('simonw:1')!;
+    applyEvent(s, {
+      kind: 'enrichment', createdAt: now,
+      entries: [{ id: 'simonw:1', contentHash: record.item.contentHash, field: 'briefZh', text: '因文中信息量不足，暂无法概括。' }],
+    });
+    expect(record.item.briefZh).toBeNull();
+
+    record.item.briefZh = '无';
+    expect(reconcileState(s).translationsReset).toBe(1);
+    expect(record.item.briefZh).toBeNull();
+
+    applyEvent(s, {
+      kind: 'enrichment', createdAt: now,
+      entries: [{ id: 'simonw:1', contentHash: record.item.contentHash, field: 'briefZh', text: '一个真正的中文要点。' }],
+    });
+    expect(record.item.briefZh).toBe('一个真正的中文要点。');
+  });
+});
+
 describe('policy repair of retained data', () => {
   it('removes old promotion-node posts even when the source no longer returns them', () => {
     const s = state(); mergeItems(s, [post({ source: 'v2ex', extra: { node: 'programmer' } })], now);

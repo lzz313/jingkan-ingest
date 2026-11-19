@@ -80,6 +80,9 @@ function externalUrls(value: string | null | undefined): Set<string> {
         if (TRACKING_PARAM.test(key)) url.searchParams.delete(key);
       }
       const path = url.pathname.replace(/\/+$/, '');
+      // A bare homepage is a source link, not evidence that two posts share
+      // the same article.
+      if (!path && !url.search) continue;
       urls.add(hostname + path + url.search);
     } catch {
       // A malformed link is not a duplicate signal.
@@ -195,6 +198,24 @@ function round(value: number): number {
 }
 
 /**
+ * Follow `duplicateOf` pointers to the earliest still-visible root so a
+ * verdict never links P3 -> P2 -> P1. A pruned or cyclic chain stays as-is:
+ * clearing it would resurrect an old post.
+ */
+function duplicateRoot(state: GeneratorState, record: StoredItem): StoredItem | null {
+  let current = record;
+  const seen = new Set<string>();
+  while (current.duplicateOf) {
+    if (seen.has(current.item.id)) return null;
+    seen.add(current.item.id);
+    const parent = state.records.get(current.duplicateOf);
+    if (!parent) return null;
+    current = parent;
+  }
+  return current;
+}
+
+/**
  * Compare NodeSeek posts against older posts in the window. A lexical pass
  * picks at most a handful of candidates; embeddings confirm only those. Any
  * failure leaves the affected records unmarked so the next run retries.
@@ -289,31 +310,42 @@ export async function runNodeSeekDedupe(config: IngestConfig, state: GeneratorSt
       if (!currentVector) { skipped++; continue; }
       // Earliest confirmed post wins, so the root stays stable across runs.
       let canonical: Candidate | undefined;
+      let resolved: StoredItem | undefined;
       let similarity = 0;
+      let missingCandidateVector = false;
       for (const candidate of [...candidates].sort((a, b) => canonicalOrder(a.record, b.record))) {
         const candidateVector = vectors.get(candidate.record.item.id);
-        if (!candidateVector) continue;
+        if (!candidateVector) { missingCandidateVector = true; continue; }
         const value = cosine(currentVector, candidateVector);
-        if (value >= settings.cosineThreshold) { canonical = candidate; similarity = value; break; }
+        if (value < settings.cosineThreshold) continue;
+        // A candidate may itself be a duplicate; point at its root instead of
+        // building a P3 -> P2 -> P1 chain.
+        const root = duplicateRoot(state, candidate.record);
+        if (!root || root.item.id === record.item.id) continue;
+        canonical = candidate;
+        resolved = root;
+        similarity = value;
+        break;
       }
-      if (canonical) {
+      if (!canonical && missingCandidateVector) { skipped++; continue; }
+      if (canonical && resolved) {
         checked++;
         duplicates++;
         if (settings.dryRun) {
-          console.log(`[dedupe] would hide ${record.item.id} as ${canonical.record.item.id} lexical=${round(candidates[0]!.score)} cosine=${round(similarity)} titles=${JSON.stringify([record.item.title, canonical.record.item.title])}`);
+          console.log(`[dedupe] would hide ${record.item.id} as ${canonical.record.item.id} lexical=${round(canonical.score)} cosine=${round(similarity)} titles=${JSON.stringify([record.item.title, resolved.item.title])}`);
           continue;
         }
         const marker: DedupeMarker = {
           hash: record.item.contentHash,
           config: fingerprint,
           checkedAt: now,
-          candidateId: candidates[0]!.record.item.id,
-          lexical: round(candidates[0]!.score),
+          candidateId: canonical.record.item.id,
+          lexical: round(canonical.score),
           cosine: round(similarity),
-          canonicalHash: canonical.record.item.contentHash,
+          canonicalHash: resolved.item.contentHash,
           ...(model ? { model } : {}),
         };
-        record.duplicateOf = canonical.record.item.id;
+        record.duplicateOf = resolved.item.id;
         record.dedupe = marker;
         continue;
       }
@@ -329,6 +361,20 @@ export async function runNodeSeekDedupe(config: IngestConfig, state: GeneratorSt
       ...(vectors && model ? { model } : {}),
     };
     checked++;
+  }
+  // Re-checking records in publication order can still leave a chain: an older
+  // record may itself become a duplicate after a newer one pointed at it.
+  // Flatten every pointer to its root so the graph stays one level deep.
+  if (!settings.dryRun) {
+    for (const record of state.records.values()) {
+      if (!record.duplicateOf) continue;
+      const root = duplicateRoot(state, record);
+      if (!root || root.item.id === record.item.id) continue;
+      if (record.duplicateOf !== root.item.id) {
+        record.duplicateOf = root.item.id;
+        if (record.dedupe) record.dedupe.canonicalHash = root.item.contentHash;
+      }
+    }
   }
   return { checked, duplicates, skipped, dryRun: settings.dryRun, reset: false };
 }

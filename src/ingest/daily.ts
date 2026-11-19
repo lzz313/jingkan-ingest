@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { beijingDate, type DailyDigest, type DailyEntry } from '../shared/daily';
+import { beijingDate, isDailyDigest, type DailyDigest, type DailyEntry } from '../shared/daily';
 import type { FeedItem, SourceId } from '../shared/types';
 import { firstSentences, stripHtml, stripMarkdown } from '../shared/html';
 import { isChineseBrief, isUsableTranslation } from '../shared/translation';
@@ -30,12 +30,26 @@ const SOURCE_QUALITY: Partial<Record<SourceId, number>> = {
 };
 
 /**
+ * A Tech Twitter canonical URL points at the aggregator's own page, not an
+ * article the reader can open as the source.
+ */
+function isExternalArticleUrl(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  try {
+    const host = new URL(value).hostname.toLowerCase().replace(/^www\./, '');
+    return host !== 'techtwitter.com' && !host.endsWith('.techtwitter.com');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Quality-first score: engagement dominates, substance and editorial source
  * priors break ties, and the per-source cap below supplies diversity.
  */
 export function dailyQuality(item: FeedItem): number {
   const text = `${item.title}\n${item.body ?? ''}`;
-  const link = /https?:\/\//i.test(text) || typeof item.extra.canonicalUrl === 'string' ? 5 : 0;
+  const link = /https?:\/\//i.test(text) || isExternalArticleUrl(item.extra.canonicalUrl) ? 5 : 0;
   const substance = Math.min(6, Math.floor((item.body?.length ?? 0) / 400));
   return (
     Math.max(0, item.hotScore) * 0.55 +
@@ -57,7 +71,8 @@ function entryFor(item: FeedItem): DailyEntry {
   const title = translatedTitle || rawTitle;
   const originalTitle = translatedTitle && rawTitle && translatedTitle !== rawTitle ? rawTitle : undefined;
   const briefZh = isChineseBrief(item.briefZh) ? item.briefZh : null;
-  const summary = item.source === 'hn' && isUsableTranslation(item.body, item.bodyZh)
+  // HN and X bodies are English; the translated body is the archive summary.
+  const summary = (item.source === 'hn' || item.source === 'x') && isUsableTranslation(item.body, item.bodyZh)
     ? item.bodyZh
     : briefZh || item.brief || item.body;
   return {
@@ -84,7 +99,7 @@ export function buildDailyDigests(items: FeedItem[], now = Date.now()): DailyDig
     list.push(item);
     days.set(day, list);
   }
-  return [...days.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([day, list]) => {
+  return [...days.entries()].sort(([a], [b]) => a.localeCompare(b)).flatMap(([day, list]) => {
     const sources: DailyDigest['sources'] = {};
     for (const item of list) sources[item.source] = (sources[item.source] ?? 0) + 1;
 
@@ -105,7 +120,11 @@ export function buildDailyDigests(items: FeedItem[], now = Date.now()): DailyDig
       selected.push(item);
       perSource.set(item.source, count + 1);
     }
-    return { version: 1, day, total: list.length, sources, entries: selected.map(entryFor) };
+    const digest: DailyDigest = { version: 1, day, total: list.length, sources, entries: selected.map(entryFor) };
+    // A day whose only items fail the hot gate (for example a joke-only X
+    // batch) has no valid entries; the archive endpoint rejects it with 400,
+    // so no digest is published at all.
+    return digest.entries.length > 0 && isDailyDigest(digest) ? [digest] : [];
   });
 }
 
@@ -163,6 +182,11 @@ export async function publishDailyDigests(config: IngestConfig, items: FeedItem[
   const updatedDays: string[] = [];
   const yesterday = beijingDate(Date.now() - 86400000);
   for (const digest of digests) {
+    const day = digest.day;
+    if (!isDailyDigest(digest)) {
+      console.warn(`[daily] skipped invalid archive for ${day}`);
+      continue;
+    }
     // Completed historical pages stay intact as the rolling timeline expires.
     if (hashes[digest.day] && digest.day < yesterday) continue;
     const body = JSON.stringify(digest);

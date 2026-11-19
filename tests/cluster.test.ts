@@ -121,6 +121,34 @@ describe('cross-source merge signals', () => {
     expect(removedItems(state)).toEqual({});
   });
 
+  it('does not spend embeddings when a shared link already confirms', async () => {
+    const older = feedItem('hn:1', {
+      title: 'Acme launch',
+      url: 'https://news.ycombinator.com/item?id=1',
+      extra: { articleUrl: 'https://acme.dev/launch' },
+      publishedAt: NOW - 7200000,
+    });
+    const lexical = feedItem('v2ex:2', {
+      title: 'Acme launch', body: 'A discussion thread', publishedAt: NOW - 5400000,
+    });
+    const newer = feedItem('linuxdo:3', {
+      title: 'Acme launch', body: '官网 https://acme.dev/launch', publishedAt: NOW - 3600000,
+    });
+    const state = makeState(older, lexical, newer);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    // Only the newest record is queued. A lexical-only candidate exists, but
+    // the shared link is self-confirming: it must neither trigger nor consume
+    // an embedding call.
+    const result = await runCrossSourceClusters(config({ maxChecks: 1 }), state, NOW);
+
+    expect(result.clusters).toBe(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(state.records.get('linuxdo:3')!.clusterOf).toBe('hn:1');
+    expect(state.records.get('linuxdo:3')!.cluster!.sharedUrl).toBe('acme.dev/launch');
+  });
+
   it('uses translation text and embeddings for a same-language-free match', async () => {
     const older = feedItem('hn:1', {
       title: 'A new open-source database for small teams',

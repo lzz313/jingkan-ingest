@@ -2,7 +2,9 @@ name: Snapshot
 on:
   workflow_dispatch:
 concurrency:
-  group: jingkan-publisher
+  # Manual repacks must not queue behind (or delay) the 5-minute ingest cron;
+  # the Durable Object publisher lease already fences concurrent R2 commits.
+  group: jingkan-snapshot-manual
   cancel-in-progress: false
 permissions:
   contents: read
@@ -23,4 +25,6 @@ jobs:
         env:
           JINGKAN_BASE_URL: https://jing.show
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+          X_TRUSTED_HANDLES: ${{ vars.X_TRUSTED_HANDLES || '' }}
+          X_HOT_GATE: ${{ vars.X_HOT_GATE || '1' }}
         run: npm run snapshot

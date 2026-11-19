@@ -7,8 +7,6 @@
   "scripts": {
     "ingest": "tsx src/ingest/run.ts",
     "snapshot": "tsx src/ingest/snapshot-run.ts",
-    "backfill": "tsx src/ingest/run.ts",
-    "moderate": "tsx src/ingest/run.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

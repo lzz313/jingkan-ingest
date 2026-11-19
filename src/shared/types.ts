@@ -50,6 +50,10 @@ export interface ItemExtra {
   hnUrl?: string;
   postsCount?: number;
   participants?: number;
+  arxivUrl?: string;
+  paperUrl?: string;
+  productUrl?: string;
+  submittedBy?: string;
   timeSource?: 'post' | 'rss' | 'trending' | 'digest' | string;
   contextBlocked?: boolean;
   [key: string]: unknown;
@@ -147,6 +151,8 @@ export interface ContextPart {
   url?: string;
   content: string;
   truncated?: boolean;
+  /** 内容分区标签，例如 投稿原文 / HN 讨论 / 原推 / 外链原文。 */
+  label?: string;
 }
 
 export interface ContextResponse {
@@ -184,6 +190,10 @@ export interface IngestResponse {
 
 export interface ItemsResponse {
   items: FeedItem[];
+  /** Only explicit visibility verdicts may remove a local favourite. */
+  removedIds?: string[];
+  /** Missing from this snapshot, including content outside its retention. */
+  unavailableIds?: string[];
 }
 
 export interface AiMessage {

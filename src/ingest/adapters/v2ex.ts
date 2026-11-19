@@ -18,7 +18,7 @@ const V2EX_HOT_URL = 'https://www.v2ex.com/api/topics/hot.json';
 const V2EX_LATEST_URL = 'https://www.v2ex.com/api/topics/latest.json';
 
 function isTopic(topic: V2exTopic | null | undefined): topic is V2exTopic {
-  return Boolean(topic && topic.id && topic.title && topic.url);
+  return Boolean(topic && topic.id && topic.title && topic.url && Number.isFinite(topic.created));
 }
 
 function mapTopic(topic: V2exTopic): NormalizedItem {
@@ -49,25 +49,34 @@ function mapTopic(topic: V2exTopic): NormalizedItem {
  * page, which is exactly when it starts climbing the hot list. Fetch both and
  * let hot.json's live metrics win for the topics they share.
  */
+/**
+ * V2EX sometimes answers HTTP 200 with an error object when rate-limiting.
+ * That is a failed fetch, not an empty topic list.
+ */
+function topicsOf(result: PromiseSettledResult<V2exTopic[]>): V2exTopic[] {
+  if (result.status === 'rejected') throw result.reason;
+  if (!Array.isArray(result.value)) throw new Error('V2EX returned an unexpected payload');
+  return result.value;
+}
+
 export async function fetchV2ex(): Promise<NormalizedItem[]> {
   const [hotResult, latestResult] = await Promise.allSettled([
     fetchJson<V2exTopic[]>(V2EX_HOT_URL),
     fetchJson<V2exTopic[]>(V2EX_LATEST_URL),
   ]);
-  if (hotResult.status === 'rejected' && latestResult.status === 'rejected') {
+  let hot: V2exTopic[] = [];
+  let latest: V2exTopic[] = [];
+  let failures = 0;
+  try { hot = topicsOf(hotResult); } catch { failures++; }
+  try { latest = topicsOf(latestResult); } catch { failures++; }
+  if (failures === 2) {
     throw new Error('V2EX hot and latest both failed');
   }
-  if (hotResult.status === 'rejected' || latestResult.status === 'rejected') {
+  if (failures > 0) {
     console.warn(
       `V2EX partial fetch: hot=${hotResult.status}, latest=${latestResult.status}`,
     );
   }
-  const hot =
-    hotResult.status === 'fulfilled' && Array.isArray(hotResult.value) ? hotResult.value : [];
-  const latest =
-    latestResult.status === 'fulfilled' && Array.isArray(latestResult.value)
-      ? latestResult.value
-      : [];
 
   const byId = new Map<string, V2exTopic>();
   for (const topic of latest) {

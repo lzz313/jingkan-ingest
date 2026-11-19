@@ -16,7 +16,7 @@ const post = (id: string): FeedItem => ({
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 beforeEach(() => { vi.mocked(fetchSources).mockReset().mockResolvedValue({ items: [], sourceStatus: {} }); });
-function mockServer(options: { uploadFails?: boolean; conflict?: boolean; renewFails?: boolean; events?: boolean; corrupt?: boolean; imageVariants?: boolean; moderate?: boolean; dedupeState?: boolean } = {}) {
+function mockServer(options: { uploadFails?: boolean; conflict?: boolean; renewFails?: boolean; events?: boolean; corrupt?: boolean; imageVariants?: boolean; moderate?: boolean; dedupeState?: boolean; noop?: boolean; dailyFails?: boolean } = {}) {
   const meta = { dataVersion: 1, lastUpdated: 100, lastRefreshAt: 0, sources: {} };
   const baseItem = post('hn:1');
   const originalImage = 'https://cdn3.ldstatic.com/original/4X/e/5/0/e501efabb23b73adbfd8e2eca3ff2f4532c1ac82.jpeg';
@@ -28,9 +28,13 @@ function mockServer(options: { uploadFails?: boolean; conflict?: boolean; renewF
     observedAt: Date.now(), ruleHidden: false, moderation: 'keep' as const, duplicateOf: 'nodeseek:1',
     dedupe: { hash: 'duplicate-hash', config: 'test-fingerprint', checkedAt: Date.now(), cosine: 1, canonicalHash: canonical.contentHash },
   };
-  const base = options.dedupeState
-    ? buildSnapshot([canonical], meta, undefined, undefined, [canonicalRecord, duplicate])
-    : buildSnapshot([baseItem], meta);
+  const base = options.noop
+    ? buildSnapshot([baseItem], { ...meta, lastIngestAttemptAt: Date.now() }, undefined, undefined, [
+        { item: baseItem, observedAt: Date.now(), ruleHidden: false, moderation: 'keep' as const },
+      ])
+    : options.dedupeState
+      ? buildSnapshot([canonical], meta, undefined, undefined, [canonicalRecord, duplicate])
+      : buildSnapshot([baseItem], meta);
   const uploadedParts = new Map<number, Buffer>();
   const paths: string[] = [], uploads: unknown[] = [];
   vi.stubGlobal('fetch', vi.fn(async (request: string | URL, init?: RequestInit) => {
@@ -49,7 +53,7 @@ function mockServer(options: { uploadFails?: boolean; conflict?: boolean; renewF
     }
     if (url.pathname.endsWith('/cleanup')) return json({ cursor: null });
     if (url.pathname.endsWith('/ack')) return json({ ok: true });
-    if (url.pathname === '/api/admin/daily') return json({ hashes: {} });
+    if (url.pathname === '/api/admin/daily') return options.dailyFails ? json({ error: 'down' }, 503) : json({ hashes: {} });
     if (method === 'PUT') {
       if (url.pathname.endsWith('/manifest')) uploads.push(body);
       if (url.pathname.endsWith('/artifact')) uploadedParts.set(Number(url.searchParams.get('part')), Buffer.from(init!.body as Uint8Array));
@@ -162,6 +166,35 @@ describe('single fenced R2 publisher', () => {
     expect(duplicate?.duplicateOf).toBe('nodeseek:1');
     expect(duplicate?.dedupe?.model).toBe('test-embed');
   });
+  it('does not rewrite the snapshot when nothing changed', async () => {
+    // 13:00 Beijing is an active source window, so only the last-attempt guard
+    // and the unchanged state may keep this run from publishing.
+    vi.useFakeTimers(); vi.setSystemTime(Date.UTC(2026, 10, 13, 5, 0));
+    const { paths } = mockServer({ noop: true });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await runPublisher(config, {});
+
+    expect(paths.some((path) => path.startsWith('PUT'))).toBe(false);
+    expect(paths.some((path) => path.includes('/activate'))).toBe(false);
+    expect(log.mock.calls.flat().join('\n')).toContain('[publish] no-op; snapshot is current');
+    log.mockRestore();
+  });
+
+  it('acknowledges inputs even when daily archives fail', async () => {
+    const { paths } = mockServer({ events: true, dailyFails: true });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await runPublisher(config, { forceFetch: true });
+
+    expect(paths.some((path) => path.includes('/activate'))).toBe(true);
+    expect(paths.findIndex((path) => path.includes('/ack')))
+      .toBeGreaterThan(paths.findIndex((path) => path.includes('/activate')));
+    expect(paths.some((path) => path.includes('/cleanup'))).toBe(true);
+    expect(errors.mock.calls.flat().join('\n')).toContain('daily archives deferred');
+    errors.mockRestore();
+  });
+
   it('repacks duplicate markers without re-embedding', async () => {
     const { paths, uploads, uploadedParts } = mockServer({ dedupeState: true });
     await runPublisher(config, { repackOnly: true });

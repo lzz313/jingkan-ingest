@@ -10,6 +10,7 @@ import { fetchHuggingFacePapers } from '../src/ingest/adapters/huggingface';
 import { fetchProductHunt } from '../src/ingest/adapters/producthunt';
 import { fetchSimonW } from '../src/ingest/adapters/simonw';
 import { fetchX } from '../src/ingest/adapters/x';
+import { parseRss } from '../src/ingest/rss';
 import { fixture } from './helpers';
 
 function stubFetch(routes: Array<{ match: string; file: string; type: string }>) {
@@ -28,6 +29,33 @@ function stubFetch(routes: Array<{ match: string; file: string; type: string }>)
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe('RSS/Atom link parsing', () => {
+  it('prefers rel="alternate" when an Atom entry has several links', () => {
+    const items = parseRss(`<feed>
+      <entry>
+        <title>Multi-link entry</title>
+        <id>tag:example.com,2026:1</id>
+        <link rel="self" href="https://example.com/self"/>
+        <link rel="alternate" href="https://example.com/article"/>
+        <link rel="replies" href="https://example.com/replies"/>
+      </entry>
+    </feed>`);
+    // Never join several hrefs into one invalid ", "-separated URL.
+    expect(items[0]!.link).toBe('https://example.com/article');
+  });
+
+  it('falls back to the first href or a plain string when no alternate exists', () => {
+    const items = parseRss(`<feed>
+      <entry><title>A</title><link rel="self" href="https://example.com/self"/></entry>
+      <entry><title>B</title><link>https://example.com/plain</link></entry>
+    </feed>`);
+    expect(items.map((item) => item.link)).toEqual([
+      'https://example.com/self',
+      'https://example.com/plain',
+    ]);
+  });
 });
 
 describe('V2EX adapter', () => {
@@ -630,7 +658,8 @@ describe('AI and product adapters', () => {
     const items = await fetchProductHunt(now);
     expect(items).toHaveLength(1);
     expect(items[0]!.source).toBe('producthunt');
-    expect(items[0]!.externalId).toBe('youart');
+    // The numeric Post id from the Atom guid, not the product slug.
+    expect(items[0]!.externalId).toBe('1308353');
     expect(items[0]!.body).toBe('Codex for creative teams');
     expect(items[0]!.body).not.toContain('Discussion');
   });

@@ -1,6 +1,6 @@
 import { deduplicateImages } from '../shared/images';
-import { isUsableTranslation, translationText } from '../shared/translation';
-import type { FeedItem, NormalizedItem, RelatedItem, SourceId, SourceStatus, IngestStatus } from '../shared/types';
+import { isChineseBrief, isUsableTranslation, translationText } from '../shared/translation';
+import type { FeedItem, ItemExtra, NormalizedItem, RelatedItem, SourceId, SourceStatus, IngestStatus } from '../shared/types';
 import { normalizeItem } from '../shared/normalize';
 import { computeHot } from '../shared/scoring';
 import { shouldHideItem } from '../shared/spam';
@@ -8,6 +8,9 @@ import { MODERATE_SOURCES } from '../shared/moderate';
 import { sourceNeedsTitleTranslation } from '../shared/sources';
 import { contentExtra } from '../shared/content-extra';
 import { DEFAULT_X_TRUSTED_HANDLES, xHotEligible } from '../shared/x-quality';
+
+// The canonical Beijing-time schedule is shared with the Worker watchdog.
+export { isSourceWindow } from '../shared/time-window';
 
 /** Private evidence behind a duplicate verdict; never published to feed items. */
 export interface DedupeMarker {
@@ -47,6 +50,10 @@ export interface StoredItem {
   ruleHidden: boolean;
   moderation: 'keep' | 'hide' | 'pending';
   aiReason?: string;
+  /** The operator set visibility explicitly; source policy and merges must not undo it. */
+  manualHidden?: boolean;
+  /** The operator curated the image list; later fetches must not replace it. */
+  manualImages?: boolean;
   /** Earliest post this record duplicates; hidden while it points at one. */
   duplicateOf?: string;
   dedupe?: DedupeMarker;
@@ -61,6 +68,8 @@ export interface GeneratorState {
   lastUpdated: number;
   lastRefreshAt: number;
   lastIngestAttemptAt: number;
+  /** Resume point for the paginated `feed/enrichment/` retention sweep. */
+  enrichmentCleanupCursor?: string | null;
 }
 export interface EnrichmentEntry { id: string; contentHash: string | null; field: 'titleZh' | 'briefZh' | 'bodyZh'; text: string }
 export type InputEvent =
@@ -79,6 +88,27 @@ export function bootstrapRecords(items: FeedItem[]): StoredItem[] {
 }
 function moderated(source: SourceId): boolean { return (MODERATE_SOURCES as readonly SourceId[]).includes(source); }
 
+/** True when metrics/text came from X's own syndication payload rather than the aggregator card. */
+function isSyndicationEnriched(extra: ItemExtra): boolean {
+  return extra.provider === 'x-syndication' || extra.statsSource === 'x-syndication';
+}
+
+/**
+ * A record whose body was captured from the full source payload. A later
+ * degraded fetch (Reader proxy, or Tech Twitter without syndication) must not
+ * shrink it back to a headline.
+ */
+function isEnrichedRecord(item: FeedItem): boolean {
+  const extra = item.extra ?? {};
+  return isSyndicationEnriched(extra) || (extra.timeSource === 'rss' && extra.proxy !== 'jina');
+}
+
+/** A fallback fetch path known to carry less text and fewer metrics than the original. */
+function isDegradedFetch(extra: ItemExtra): boolean {
+  if (extra.proxy === 'jina') return true;
+  return extra.provider === 'tech-twitter' && !isSyndicationEnriched(extra);
+}
+
 export function mergeItems(state: GeneratorState, inputs: NormalizedItem[], now: number): number {
   let changes = 0;
   for (const raw of inputs) {
@@ -87,22 +117,30 @@ export function mergeItems(state: GeneratorState, inputs: NormalizedItem[], now:
     const id = `${normalized.source}:${normalized.externalId}`;
     const old = state.records.get(id);
     if (old && now < old.observedAt) continue;
-    const edited = !old || old.item.contentHash !== normalized.contentHash;
-    const hidden = Boolean(normalized.hidden || shouldHideItem(normalized));
+    // Keep the richer body/metrics/translations when a provider falls back to
+    // a degraded path for content that was already fully captured.
+    const downgraded = Boolean(old && isEnrichedRecord(old.item) && isDegradedFetch(normalized.extra ?? {}));
+    const edited = !old || (!downgraded && old.item.contentHash !== normalized.contentHash);
+    const hidden = old?.manualHidden ? old.item.hidden : Boolean(normalized.hidden || shouldHideItem(normalized));
     const hot = computeHot(normalized.source, normalized.metrics ?? {});
     const next: FeedItem = {
       id, source: normalized.source, externalId: normalized.externalId, storyKey: normalized.storyKey ?? null,
       title: normalized.title,
-      titleZh: sourceNeedsTitleTranslation(normalized.source) ? normalized.titleZh ?? (edited ? null : old?.item.titleZh ?? null) : null,
-      body: normalized.body || null, brief: normalized.brief || null,
-      briefZh: normalized.briefZh ?? (edited ? null : old?.item.briefZh ?? null),
-      bodyZh: normalized.bodyZh ?? (edited ? null : old?.item.bodyZh ?? null),
+      titleZh: downgraded ? old!.item.titleZh
+        : sourceNeedsTitleTranslation(normalized.source) ? normalized.titleZh ?? (edited ? null : old?.item.titleZh ?? null) : null,
+      body: downgraded ? old!.item.body : normalized.body || null,
+      brief: downgraded ? old!.item.brief : normalized.brief || null,
+      briefZh: downgraded ? old!.item.briefZh : normalized.briefZh ?? (edited ? null : old?.item.briefZh ?? null),
+      bodyZh: downgraded ? old!.item.bodyZh : normalized.bodyZh ?? (edited ? null : old?.item.bodyZh ?? null),
       url: old && normalized.source === 'hn' ? old.item.url : normalized.url,
-      author: normalized.author ?? null, authorHandle: normalized.authorHandle ?? null,
+      author: downgraded ? old!.item.author : normalized.author ?? null,
+      authorHandle: downgraded ? old!.item.authorHandle : normalized.authorHandle ?? null,
       publishedAt: old && normalized.source !== 'github' ? old.item.publishedAt : normalized.publishedAt,
       firstSeenAt: old?.item.firstSeenAt ?? now, fetchedAt: now,
-      metrics: normalized.metrics ?? {}, hotScore: hot.score, isHot: hot.isHot,
-      images: normalized.images?.length ? normalized.images : old?.item.images ?? [],
+      metrics: downgraded ? old!.item.metrics : normalized.metrics ?? {}, hotScore: hot.score, isHot: hot.isHot,
+      images: old?.manualImages ? old.item.images
+        : downgraded ? old!.item.images
+        : normalized.images?.length ? normalized.images : old?.item.images ?? [],
       extra: normalized.extra ?? {}, hidden, contentHash: normalized.contentHash ?? null,
     };
     const stable = (item: FeedItem) => JSON.stringify([
@@ -119,6 +157,8 @@ export function mergeItems(state: GeneratorState, inputs: NormalizedItem[], now:
         ...(!edited && old?.dedupe ? { dedupe: old.dedupe } : {}),
         ...(!edited && old?.clusterOf ? { clusterOf: old.clusterOf } : {}),
         ...(!edited && old?.cluster ? { cluster: old.cluster } : {}),
+        ...(old?.manualHidden ? { manualHidden: true } : {}),
+        ...(old?.manualImages ? { manualImages: true } : {}),
       });
       changes++;
     } else {
@@ -139,15 +179,29 @@ export function applyEvent(state: GeneratorState, event: InputEvent): void {
       if (!record || record.item.contentHash !== entry.contentHash || !['titleZh', 'briefZh', 'bodyZh'].includes(entry.field) || typeof entry.text !== 'string') continue;
       if (entry.field === 'titleZh' && !sourceNeedsTitleTranslation(record.item.source)) continue;
       const field = entry.field === 'titleZh' ? 'title' : entry.field === 'briefZh' ? 'brief' : 'body';
-      if (isUsableTranslation(translationText(record.item, field), entry.text)) record.item[entry.field] = entry.text;
+      // A brief is the Chinese key-point row; model meta-notes and a bare 无
+      // are not summaries and must never be stored as one.
+      const usable = entry.field === 'briefZh'
+        ? isChineseBrief(entry.text)
+        : isUsableTranslation(translationText(record.item, field), entry.text);
+      if (usable) record.item[entry.field] = entry.text;
     }
   }
   if (event.kind === 'maintenance' && Array.isArray(event.patches)) {
     for (const patch of event.patches) {
       const record = state.records.get(patch.id);
       if (!record || event.createdAt < record.observedAt) continue;
-      if (typeof patch.hidden === 'boolean') { record.ruleHidden = patch.hidden; record.item.hidden = patch.hidden; }
-      if (Array.isArray(patch.images)) record.item.images = deduplicateImages(patch.images, record.item.url);
+      if (typeof patch.hidden === 'boolean') {
+        record.ruleHidden = patch.hidden;
+        record.item.hidden = patch.hidden;
+        // Operator visibility is sticky: neither policy reconciliation nor a
+        // later fetch may silently flip it back.
+        record.manualHidden = true;
+      }
+      if (Array.isArray(patch.images)) {
+        record.item.images = deduplicateImages(patch.images, record.item.url);
+        record.manualImages = true;
+      }
     }
   }
 }
@@ -175,12 +229,15 @@ export function deduplicateStateImages(state: GeneratorState): number {
 export function reconcileState(state: GeneratorState): { hidden: number; translationsReset: number } {
   let hidden = 0, translationsReset = 0;
   for (const record of state.records.values()) {
-    if (!record.ruleHidden && shouldHideItem(record.item)) {
+    if (!record.ruleHidden && !record.manualHidden && shouldHideItem(record.item)) {
       record.ruleHidden = true; record.item.hidden = true; hidden++;
     }
     for (const field of ['title', 'brief', 'body'] as const) {
       const target = field === 'title' ? 'titleZh' : field === 'brief' ? 'briefZh' : 'bodyZh';
-      if (record.item[target] && !isUsableTranslation(translationText(record.item, field), record.item[target])) {
+      const usable = field === 'brief'
+        ? isChineseBrief(record.item[target])
+        : isUsableTranslation(translationText(record.item, field), record.item[target]);
+      if (record.item[target] && !usable) {
         record.item[target] = null; translationsReset++;
       }
     }
@@ -310,15 +367,4 @@ export function reconcileRemovedMap(base: Record<string, number>, state: Generat
     if (record && !record.ruleHidden && record.moderation === 'keep' && !record.duplicateOf) delete removed[id];
   }
   return removed;
-}
-/** Minutes since midnight in Beijing, independent of the runner's time zone. */
-function beijingMinutes(timestamp: number): number {
-  const date = new Date(timestamp + 8 * 3600000);
-  return date.getUTCHours() * 60 + date.getUTCMinutes();
-}
-export function isSourceWindow(timestamp: number): boolean {
-  const minutes = beijingMinutes(timestamp);
-  // 06:00–08:00 only opens the top ten minutes of each hour: one fetch per
-  // hour there, while the rest of the day keeps the ten-minute cadence.
-  return [[360,370],[420,430],[510,720],[750,760],[780,1080],[1110,1120],[1140,1420]].some(([start,end]) => minutes >= start! && minutes < end!);
 }

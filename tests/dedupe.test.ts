@@ -132,6 +132,15 @@ describe('NodeSeek lexical prefilter', () => {
     expect(text).toHaveLength(50);
     expect(text.startsWith('标题\n')).toBe(true);
   });
+
+  it('ignores a bare homepage link as duplicate evidence', () => {
+    // Two unrelated posts that both cite the same homepage must not be
+    // treated as sharing an article.
+    expect(lexicalSimilarity(
+      feedItem('nodeseek:1', { title: '苹果发布会', body: '来源 https://example.com/' }),
+      feedItem('nodeseek:2', { title: '数据库迁移', body: '来源 https://example.com/' }),
+    )).toBe(0);
+  });
 });
 
 describe('cosine and fingerprint', () => {
@@ -179,7 +188,7 @@ describe('runNodeSeekDedupe', () => {
     expect(calls[0]).toHaveLength(2);
   });
 
-  it('allows chains and keeps the oldest root visible', async () => {
+  it('flattens transitive matches onto the oldest root', async () => {
     const angle = Math.acos(0.83);
     const alpha = feedItem('nodeseek:1', { title: 'Alpha 主题', body: 'alpha body', publishedAt: NOW - 10800000 });
     const beta = feedItem('nodeseek:2', { title: 'Beta 主题', body: 'beta body', publishedAt: NOW - 7200000 });
@@ -194,7 +203,10 @@ describe('runNodeSeekDedupe', () => {
     await runNodeSeekDedupe(config(), state, NOW);
 
     expect(state.records.get('nodeseek:2')!.duplicateOf).toBe('nodeseek:1');
-    expect(state.records.get('nodeseek:3')!.duplicateOf).toBe('nodeseek:2');
+    // P3 matched P2 before P2 was itself marked; the pointer is flattened so
+    // there is never a P3 -> P2 -> P1 chain.
+    expect(state.records.get('nodeseek:3')!.duplicateOf).toBe('nodeseek:1');
+    expect(state.records.get('nodeseek:3')!.dedupe!.canonicalHash).toBe(alpha.contentHash);
     expect(visibleItems(state).map((item) => item.id)).toEqual(['nodeseek:1']);
     expect(removedItems(state)).toHaveProperty('nodeseek:2');
     expect(removedItems(state)).toHaveProperty('nodeseek:3');
@@ -419,6 +431,51 @@ describe('embedding client', () => {
       stubFetch(() => ({ body: { model: 'test-embed', ...failure } }));
       await expect(createEmbedder(config(), 20000)(['a', 'b'])).rejects.toThrow();
     }
+  });
+
+  it('packs batches under the Worker 12,000-character total limit', async () => {
+    const calls = stubFetch((texts) => ({
+      body: { model: 'test-embed', dimensions: 8, embeddings: texts.map(() => SAME) },
+    }));
+    const result = await createEmbedder(config(), 20000)(['a'.repeat(6000), 'b'.repeat(6000), 'c'.repeat(6000)]);
+
+    expect(calls.map((batch) => batch.length)).toEqual([2, 1]);
+    expect(calls.map((batch) => batch.reduce((sum, text) => sum + text.length, 0))).toEqual([12000, 6000]);
+    expect(result.vectors).toHaveLength(3);
+  });
+
+  it('drops blank texts and truncates single oversized inputs', async () => {
+    const calls = stubFetch((texts) => ({
+      body: { model: 'test-embed', dimensions: 8, embeddings: texts.map(() => SAME) },
+    }));
+    const result = await createEmbedder(config(), 20000)(['   ', 'x'.repeat(13000)]);
+
+    expect(calls).toEqual([['x'.repeat(12000)]]);
+    // The blank slot stays empty so callers leave that record unmarked.
+    expect(result.vectors[0]).toBeUndefined();
+    expect(result.vectors[1]).toEqual(SAME);
+  });
+
+  it('keeps earlier vectors when a later batch request fails', async () => {
+    const calls = stubFetch((texts) => texts[0]!.startsWith('b-')
+      ? { status: 503, body: { error: 'unavailable' } }
+      : { body: { model: 'test-embed', dimensions: 8, embeddings: texts.map(() => SAME) } });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const texts = [
+      ...Array.from({ length: 20 }, (_, index) => `a-${index}`),
+      ...Array.from({ length: 3 }, (_, index) => `b-${index}`),
+    ];
+
+    const result = await createEmbedder(config(), 20000)(texts);
+
+    // The first batch succeeds; every later call is a retried b-batch attempt.
+    expect(calls[0]).toHaveLength(20);
+    expect(calls.slice(1).length).toBeGreaterThanOrEqual(1);
+    expect(calls.slice(1).every((batch) => batch[0]!.startsWith('b-'))).toBe(true);
+    for (const vector of result.vectors.slice(0, 20)) expect(vector).toEqual(SAME);
+    expect(result.vectors.slice(20).every((vector) => vector === undefined)).toBe(true);
+    expect(warn.mock.calls.flat().join('\n')).toContain('later batch failed');
+    warn.mockRestore();
   });
 
   it('rejects a dimension change between batches', async () => {
