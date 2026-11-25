@@ -213,6 +213,34 @@ export function updateSources(state: GeneratorState, status: Partial<Record<Sour
   }
   if (Object.values(status).some((entry) => entry?.ok && (entry.count ?? 0) > 0)) state.lastUpdated = Math.max(state.lastUpdated, now);
 }
+
+/**
+ * Attach each source's newest visible non-clustered `publishedAt` so sitemaps
+ * report genuine content modification times instead of every scrape attempt.
+ */
+export function sourcesWithLatestItemAt(
+  sources: Partial<Record<SourceId, SourceStatus>>,
+  items: FeedItem[],
+): Partial<Record<SourceId, SourceStatus>> {
+  const latest = new Map<SourceId, number>();
+  for (const item of items) {
+    if (item.hidden || item.clusterOf || !Number.isFinite(item.publishedAt) || item.publishedAt <= 0) continue;
+    latest.set(item.source, Math.max(latest.get(item.source) ?? 0, item.publishedAt));
+  }
+  const enriched: Partial<Record<SourceId, SourceStatus>> = {};
+  const allSources = new Set<SourceId>([...(Object.keys(sources) as SourceId[]), ...latest.keys()]);
+  for (const source of allSources) {
+    const base = sources[source];
+    const latestItemAt = latest.get(source);
+    if (base) {
+      const { latestItemAt: _prev, ...rest } = base;
+      enriched[source] = latestItemAt ? { ...rest, latestItemAt } : rest;
+    } else if (latestItemAt) {
+      enriched[source] = { ok: true, lastUpdated: latestItemAt, latestItemAt };
+    }
+  }
+  return enriched;
+}
 /** Repair retained image lists without changing source freshness or content hashes. */
 export function deduplicateStateImages(state: GeneratorState): number {
   let changed = 0;

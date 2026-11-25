@@ -68,6 +68,69 @@ export function isDailyDate(value: string): boolean {
 export function dailyKey(day: string): string { return `${DAILY_PREFIX}${day.slice(0, 4)}/${day}.json`; }
 export function beijingDate(timestamp: number): string { return new Date(timestamp + 8 * 3600000).toISOString().slice(0, 10); }
 
+const DAY_MS = 86_400_000;
+
+/**
+ * ISO 8601 week identifier (`YYYY-Www`, Monday–Sunday) for a YYYY-MM-DD calendar date.
+ */
+export function isoWeekOfDay(day: string): string {
+  const date = new Date(`${day}T00:00:00Z`);
+  // Shift to Thursday of the same ISO week: that Thursday's calendar year is
+  // the ISO week-year, and its day-of-year determines the week number.
+  const weekday = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - weekday);
+  const isoYear = date.getUTCFullYear();
+  const yearStart = Date.UTC(isoYear, 0, 1);
+  const week = Math.floor((date.getTime() - yearStart) / DAY_MS / 7) + 1;
+  return `${isoYear}-W${String(week).padStart(2, '0')}`;
+}
+
+export interface IsoWeekBounds {
+  week: string;
+  year: number;
+  weekNumber: number;
+  start: string;
+  end: string;
+  days: string[];
+  years: string[];
+}
+
+/**
+ * Resolve an ISO week id (`YYYY-Www`) into its Monday–Sunday calendar dates,
+ * or null when the format or week number is out of range for that ISO year.
+ */
+export function isoWeekBounds(value: string): IsoWeekBounds | null {
+  const match = value.match(/^(\d{4})-W(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const weekNumber = Number(match[2]);
+  if (weekNumber < 1 || weekNumber > 53) return null;
+  // Jan 4 is always in ISO week 1. Walk back to its Monday, then advance.
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const jan4Weekday = jan4.getUTCDay() || 7;
+  const week1Monday = Date.UTC(year, 0, 4 - (jan4Weekday - 1));
+  const mondayMs = week1Monday + (weekNumber - 1) * 7 * DAY_MS;
+  const start = new Date(mondayMs).toISOString().slice(0, 10);
+  // Verify round-trip so week 53 is rejected for 52-week years.
+  if (isoWeekOfDay(start) !== value) return null;
+  const days = Array.from({ length: 7 }, (_, index) =>
+    new Date(mondayMs + index * DAY_MS).toISOString().slice(0, 10),
+  );
+  const end = days[6]!;
+  const years = [...new Set([start.slice(0, 4), end.slice(0, 4)])];
+  return { week: value, year, weekNumber, start, end, days, years };
+}
+
+export function isIsoWeek(value: string): boolean {
+  return isoWeekBounds(value) !== null;
+}
+
+export function formatIsoWeekLabel(week: string): string {
+  const match = week.match(/^(\d{4})-W(\d{2})$/);
+  if (!match) return week;
+  return `${match[1]} 年第 ${Number(match[2])} 周`;
+}
+
 export function isDailyDigest(value: unknown): value is DailyDigest {
   if (!value || typeof value !== 'object') return false;
   const digest = value as DailyDigest;

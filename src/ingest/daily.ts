@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
-import { beijingDate, isDailyDigest, type DailyDigest, type DailyEntry } from '../shared/daily';
+import { beijingDate, clipDailyText, isDailyDigest, isoWeekOfDay, type DailyDigest, type DailyEntry } from '../shared/daily';
 import type { FeedItem, SourceId } from '../shared/types';
 import { firstSentences, stripHtml, stripMarkdown } from '../shared/html';
+import { formatCompactNumber } from '../shared/numbers';
 import { isChineseBrief, isUsableTranslation } from '../shared/translation';
-import { sourceNeedsTitleTranslation } from '../shared/sources';
+import { SOURCES, sourceNeedsTitleTranslation } from '../shared/sources';
+import { itemTopics, topicPath, type TopicId } from '../shared/topics';
 import type { IngestConfig } from './env';
 import { call } from './snapshot-client';
 
@@ -60,6 +62,86 @@ export function dailyQuality(item: FeedItem): number {
   );
 }
 
+function finiteMetric(value: number | string | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+  return value;
+}
+
+/**
+ * Specific, data-backed selection reason so daily archive entries carry real
+ * signals instead of repeating the same boilerplate line twelve times.
+ */
+export function dailyReason(item: FeedItem): string {
+  const parts: string[] = [];
+  const metrics = item.metrics ?? {};
+  const extra = item.extra ?? {};
+  const addMetric = (value: number | string | undefined, format: (formatted: string) => string) => {
+    const number = finiteMetric(value);
+    if (number !== null) parts.push(format(formatCompactNumber(number)));
+  };
+
+  switch (item.source) {
+    case 'hn':
+      addMetric(metrics.points, (n) => `${n} 分`);
+      addMetric(metrics.comments, (n) => `${n} 评论`);
+      break;
+    case 'github':
+      addMetric(metrics.starsToday, (n) => `今日 +${n} stars`);
+      addMetric(metrics.starsTotal, (n) => `${n} stars`);
+      if (typeof extra.lang === 'string' && extra.lang.trim()) parts.push(extra.lang.trim());
+      break;
+    case 'x':
+      addMetric(metrics.views, (n) => `浏览 ${n}`);
+      addMetric(metrics.likes, (n) => `赞 ${n}`);
+      addMetric(metrics.retweets, (n) => `转发 ${n}`);
+      break;
+    case 'v2ex':
+      addMetric(metrics.replies, (n) => `${n} 回复`);
+      if (typeof extra.nodeTitle === 'string' && extra.nodeTitle.trim()) parts.push(extra.nodeTitle.trim());
+      break;
+    case 'linuxdo':
+      addMetric(metrics.posts, (n) => `${n} 帖`);
+      if (typeof extra.category === 'string' && extra.category.trim()) parts.push(extra.category.trim());
+      break;
+    case 'nodeseek':
+      addMetric(metrics.comments, (n) => `${n} 回复`);
+      addMetric(metrics.views, (n) => `浏览 ${n}`);
+      break;
+    case 'hf-papers':
+      addMetric(metrics.upvotes, (n) => `${n} 赞同`);
+      addMetric(metrics.comments, (n) => `${n} 讨论`);
+      break;
+    case 'reddit':
+      if (typeof extra.subreddit === 'string' && extra.subreddit.trim()) parts.push(`r/${extra.subreddit.trim()}`);
+      break;
+    case 'google-ai':
+      parts.push(typeof extra.category === 'string' && extra.category.trim() ? `官方博客 · ${extra.category.trim()}` : 'Google AI 官方发布');
+      break;
+    case 'simonw':
+      parts.push('独立技术专栏精选');
+      break;
+    case 'producthunt':
+      parts.push('每日科技新品');
+      break;
+  }
+
+  if (item.related?.length) {
+    const others = item.related
+      .map((entry) => SOURCES[entry.source]?.shortName ?? entry.source)
+      .slice(0, 3)
+      .join(' / ');
+    parts.push(`同题另有 ${others} 讨论`);
+  }
+
+  if (!parts.length) {
+    parts.push(item.isHot ? '达到该来源活跃热度门槛' : `${SOURCES[item.source].shortName} 当日质量精选`);
+  } else if (item.isHot && parts.length === 1 && (item.source === 'reddit' || item.source === 'producthunt')) {
+    parts.push('达到活跃热度门槛');
+  }
+
+  return clipDailyText(`质量优先 · ${parts.join(' · ')}`, 190);
+}
+
 function entryFor(item: FeedItem): DailyEntry {
   const rawTitle = stripHtml(item.title).slice(0, 320);
   const translatedTitle =
@@ -81,9 +163,7 @@ function entryFor(item: FeedItem): DailyEntry {
     summary: firstSentences(stripMarkdown(stripHtml(summary)), 220), url: item.url,
     author: (item.source === 'x' && item.authorHandle ? '@' + item.authorHandle : item.author)?.slice(0, 200) ?? null,
     publishedAt: item.publishedAt,
-    reason: item.isHot
-      ? '质量优先选入；已达到该来源的活跃度门槛。'
-      : '质量优先选入；综合互动、内容质量和来源信度排序。',
+    reason: dailyReason(item),
   };
 }
 
@@ -131,7 +211,12 @@ export function buildDailyDigests(items: FeedItem[], now = Date.now()): DailyDig
 const INDEXNOW_ENDPOINT = 'https://api.indexnow.org/indexnow';
 
 /** Notify IndexNow (Bing / Yandex / ChatGPT Search) when public archive pages change. */
-export async function notifyIndexNow(config: IngestConfig, updatedDays: string[]): Promise<boolean> {
+export async function notifyIndexNow(
+  config: IngestConfig,
+  updatedDays: string[],
+  updatedSources: SourceId[] = [],
+  updatedTopics: TopicId[] = [],
+): Promise<boolean> {
   const key = config.indexNowKey?.trim();
   if (!key || !/^[a-zA-Z0-9-]{8,128}$/.test(key) || updatedDays.length === 0) return false;
   let origin: URL;
@@ -143,11 +228,20 @@ export async function notifyIndexNow(config: IngestConfig, updatedDays: string[]
   if (origin.protocol !== 'https:' || origin.hostname === 'localhost' || origin.hostname === '127.0.0.1') {
     return false;
   }
+  const years = [...new Set(updatedDays.map((day) => day.slice(0, 4)).filter((year) => /^\d{4}$/.test(year)))];
+  const weeks = [...new Set(updatedDays.map((day) => isoWeekOfDay(day)))];
+  const sources = [...new Set(updatedSources)];
+  const topics = [...new Set(updatedTopics)];
   const urlList = [
     `${origin.origin}/`,
     `${origin.origin}/hot`,
     `${origin.origin}/daily`,
+    `${origin.origin}/weekly`,
+    ...years.map((year) => `${origin.origin}/daily/${year}`),
+    ...weeks.map((week) => `${origin.origin}/weekly/${week}`),
     ...updatedDays.map((day) => `${origin.origin}/daily/${day}`),
+    ...sources.map((source) => `${origin.origin}/source/${source}`),
+    ...(topics.length > 0 ? [`${origin.origin}/topic`, ...topics.map((topic) => `${origin.origin}${topicPath(topic)}`)] : []),
   ];
   try {
     const response = await fetch(INDEXNOW_ENDPOINT, {
@@ -180,6 +274,8 @@ export async function publishDailyDigests(config: IngestConfig, items: FeedItem[
     Object.assign(hashes, index.hashes);
   }
   const updatedDays: string[] = [];
+  const updatedSources = new Set<SourceId>();
+  const updatedTopics = new Set<TopicId>();
   const yesterday = beijingDate(Date.now() - 86400000);
   for (const digest of digests) {
     const day = digest.day;
@@ -199,9 +295,18 @@ export async function publishDailyDigests(config: IngestConfig, items: FeedItem[
       },
     });
     updatedDays.push(digest.day);
+    for (const source of Object.keys(digest.sources) as SourceId[]) {
+      updatedSources.add(source);
+    }
   }
   if (updatedDays.length > 0) {
-    await notifyIndexNow(config, updatedDays);
+    const updatedDaySet = new Set(updatedDays);
+    for (const item of items) {
+      if (item.hidden || item.clusterOf || !Number.isFinite(item.publishedAt)) continue;
+      if (!updatedDaySet.has(beijingDate(item.publishedAt))) continue;
+      for (const topic of itemTopics(item)) updatedTopics.add(topic);
+    }
+    await notifyIndexNow(config, updatedDays, [...updatedSources], [...updatedTopics]);
   }
   return updatedDays.length;
 }

@@ -166,6 +166,8 @@ export interface SourceStatus {
   ok: boolean;
   lastUpdated: number;
   lastError?: string;
+  /** Publication timestamp of the newest visible item from this source. */
+  latestItemAt?: number;
 }
 
 export interface MetaResponse {

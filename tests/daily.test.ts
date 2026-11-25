@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { buildDailyDigests, dailyQuality, notifyIndexNow, publishDailyDigests } from '../src/ingest/daily';
+import { buildDailyDigests, dailyQuality, dailyReason, notifyIndexNow, publishDailyDigests } from '../src/ingest/daily';
 import { CLUSTER_DEFAULTS, DEDUPE_DEFAULTS } from '../src/ingest/env';
 import { isDailyDigest } from '../src/shared/daily';
 import { SOURCE_IDS, type FeedItem, type SourceId } from '../src/shared/types';
@@ -49,6 +49,24 @@ it('prefers quality over rotation while keeping diversity as a constraint', () =
   expect(new Set(digest!.entries.map((entry) => entry.source))).toEqual(new Set(['hn', 'v2ex', 'simonw']));
   expect(digest!.entries[0]!.id).toBe('hn:1');
   expect(digest!.entries[0]!.reason).toContain('质量优先');
+});
+
+it('builds specific data-backed selection reasons instead of boilerplate', () => {
+  expect(
+    dailyReason({
+      ...item('hn', 1),
+      metrics: { points: 428, comments: 196 },
+      related: [{ id: 'x:1', source: 'x', title: 'Same', titleZh: null, url: 'https://x.com/1', author: null, publishedAt: now }],
+    }),
+  ).toBe('质量优先 · 428 分 · 196 评论 · 同题另有 X 讨论');
+  expect(
+    dailyReason({
+      ...item('github', 1),
+      metrics: { starsToday: 1200, starsTotal: 12500 },
+      extra: { lang: 'TypeScript' },
+    }),
+  ).toBe('质量优先 · 今日 +1.2k stars · 1.3万 stars · TypeScript');
+  expect(dailyReason(item('simonw', 1))).toBe('质量优先 · 独立技术专栏精选');
 });
 
 it('skips days whose only items fail the hot gate', () => {
@@ -131,7 +149,9 @@ it('skips unchanged and completed archives and fences changed writes to the new 
 
 it('submits updated archive URLs to IndexNow when configured and never blocks on errors', async () => {
   vi.useFakeTimers(); vi.setSystemTime(now);
-  const items = [item('hn', 2, now - 86400000)];
+  const items = [
+    { ...item('hn', 2, now - 86400000), title: 'Open Source LLM Agent Benchmarks', titleZh: '开源大模型智能体评测' },
+  ];
   const calls: Array<{ url: string; method?: string; body?: string }> = [];
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
     const url = String(input);
@@ -158,7 +178,14 @@ it('submits updated archive URLs to IndexNow when configured and never blocks on
       'https://jing.show/',
       'https://jing.show/hot',
       'https://jing.show/daily',
+      'https://jing.show/weekly',
+      'https://jing.show/daily/2026',
+      'https://jing.show/weekly/2026-W46',
       'https://jing.show/daily/2026-11-12',
+      'https://jing.show/source/hn',
+      'https://jing.show/topic',
+      'https://jing.show/topic/ai',
+      'https://jing.show/topic/open-source',
     ],
   });
 

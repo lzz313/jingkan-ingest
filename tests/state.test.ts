@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyEvent, bootstrapRecords, enrichmentRecords, reconcileDuplicatePointers, reconcileRemovedMap, reconcileState, deduplicateStateImages, mergeItems, pruneState, removedItems, updateSources, visibleItems, isSourceWindow, STATE_RETENTION_MS, type GeneratorState, type StoredItem } from '../src/ingest/state';
+import { applyEvent, bootstrapRecords, enrichmentRecords, reconcileDuplicatePointers, reconcileRemovedMap, reconcileState, deduplicateStateImages, mergeItems, pruneState, removedItems, sourcesWithLatestItemAt, updateSources, visibleItems, isSourceWindow, STATE_RETENTION_MS, type GeneratorState, type StoredItem } from '../src/ingest/state';
 import type { NormalizedItem, FeedItem } from '../src/shared/types';
 const now = Date.UTC(2026, 10, 13, 2);
 function state(): GeneratorState { return { records: new Map(), sources: {}, lastUpdated: 0, lastRefreshAt: 0, lastIngestAttemptAt: 0 }; }
@@ -122,6 +122,28 @@ describe('events, retention and source freshness', () => {
     updateSources(s, { x: { ok: true, count: 0 } }, now + 2);
     updateSources(s, { hn: { ok: true, count: 2 } }, now - 1);
     expect(s.lastUpdated).toBe(now); expect(s.sources.hn!.ok).toBe(false);
+  });
+  it('computes per-source latestItemAt from visible non-clustered items only', () => {
+    const s = state();
+    mergeItems(s, [
+      post({ source: 'simonw', externalId: '1', publishedAt: now - 50000 }),
+      post({ source: 'simonw', externalId: '2', publishedAt: now - 10000 }),
+      post({ source: 'hn', externalId: '1', publishedAt: now - 20000 }),
+      post({ source: 'hn', externalId: '2', publishedAt: now - 1000 }),
+    ], now);
+    // Clustered child and hidden items must not advance latestItemAt.
+    s.records.get('hn:2')!.clusterOf = 'hn:1';
+    const enriched = sourcesWithLatestItemAt(
+      {
+        simonw: { ok: true, lastUpdated: now },
+        hn: { ok: true, lastUpdated: now },
+        'google-ai': { ok: false, lastUpdated: now, lastError: 'timeout' },
+      },
+      visibleItems(s),
+    );
+    expect(enriched.simonw?.latestItemAt).toBe(now - 10000);
+    expect(enriched.hn?.latestItemAt).toBe(now - 20000);
+    expect(enriched['google-ai']?.latestItemAt).toBeUndefined();
   });
   it('uses the approved Beijing source-fetch slots', () => {
     expect(isSourceWindow(Date.UTC(2026, 10, 13, 0, 30))).toBe(true);

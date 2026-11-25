@@ -7,7 +7,7 @@ import { call, post, readBase, readBaseItems, readBaseRecords, uploadSnapshot } 
 import { buildSnapshot } from './snapshot';
 import { fetchSources } from './sources';
 import { publishDailyDigests } from './daily';
-import { applyEvent, bootstrapRecords, enrichmentRecords, isSourceWindow, mergeItems, deduplicateStateImages, pruneState, reconcileClusterPointers, reconcileDuplicatePointers, reconcileRemovedMap, reconcileState, updateSources, visibleItems, STATE_RETENTION_MS,
+import { applyEvent, bootstrapRecords, enrichmentRecords, isSourceWindow, mergeItems, deduplicateStateImages, pruneState, reconcileClusterPointers, reconcileDuplicatePointers, reconcileRemovedMap, reconcileState, sourcesWithLatestItemAt, updateSources, visibleItems, STATE_RETENTION_MS,
   type EnrichmentEntry, type GeneratorState, type InputEvent, type StoredItem } from './state';
 import { runNodeSeekDedupe } from './dedupe';
 import { runCrossSourceClusters } from './cluster';
@@ -204,7 +204,7 @@ export async function runPublisher(config: IngestConfig, options: PublishOptions
     });
     const built = buildSnapshot(items, {
       dataVersion: base.dataVersion + 1, lastUpdated: state.lastUpdated, lastRefreshAt: state.lastRefreshAt,
-      lastIngestAttemptAt: state.lastIngestAttemptAt, sources: state.sources, enrichmentCleanupCursor: state.enrichmentCleanupCursor,
+      lastIngestAttemptAt: state.lastIngestAttemptAt, sources: sourcesWithLatestItemAt(state.sources, items), enrichmentCleanupCursor: state.enrichmentCleanupCursor,
       removed: reconcileRemovedMap(base.removed ?? {}, state, now), processedEvents: events.map((event) => event.key),
     }, Date.now(), undefined, [...state.records.values()]);
     await renewal;
