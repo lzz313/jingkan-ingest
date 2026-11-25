@@ -1,5 +1,15 @@
 import { createHash } from 'node:crypto';
-import { beijingDate, clipDailyText, isDailyDigest, isoWeekOfDay, type DailyDigest, type DailyEntry } from '../shared/daily';
+import {
+  beijingDate,
+  clipDailyText,
+  entriesSignature,
+  formatIsoWeekLabel,
+  isDailyDigest,
+  isoWeekOfDay,
+  type DailyDigest,
+  type DailyEntry,
+  type WeeklyOverview,
+} from '../shared/daily';
 import type { FeedItem, SourceId } from '../shared/types';
 import { firstSentences, stripHtml, stripMarkdown } from '../shared/html';
 import { formatCompactNumber } from '../shared/numbers';
@@ -7,10 +17,12 @@ import { isChineseBrief, isUsableTranslation } from '../shared/translation';
 import { SOURCES, sourceNeedsTitleTranslation } from '../shared/sources';
 import { itemTopics, topicPath, type TopicId } from '../shared/topics';
 import type { IngestConfig } from './env';
-import { call } from './snapshot-client';
+import { call, post } from './snapshot-client';
 
 const DAILY_LIMIT = 12;
 const PER_SOURCE_LIMIT = 2;
+const DAILY_OVERVIEW_REFRESH_MS = 2 * 60 * 60_000;
+const WEEKLY_OVERVIEW_REFRESH_MS = 6 * 60 * 60_000;
 
 /**
  * Editorial prior on top of engagement. Curated sources (a personal blog,
@@ -266,17 +278,151 @@ export async function notifyIndexNow(
   }
 }
 
+interface ArchiveIndexMeta {
+  sig?: string;
+  hasOverview?: boolean;
+  uploaded?: number;
+}
+
+async function requestDigestOverview(
+  config: IngestConfig,
+  scope: 'daily' | 'weekly',
+  label: string,
+  entries: ReadonlyArray<Pick<DailyEntry, 'source' | 'title' | 'summary'>>,
+): Promise<string | null> {
+  if (!entries.length) return null;
+  try {
+    const result = await post<{ overview?: string }>(config, '/api/admin/enrich', {
+      kind: 'digest-overview',
+      scope,
+      label,
+      entries: entries.slice(0, 20).map((entry) => ({
+        source: SOURCES[entry.source]?.name ?? entry.source,
+        title: entry.title,
+        summary: entry.summary,
+      })),
+    });
+    const text = result.overview?.trim();
+    return text && text.length <= 600 ? text : null;
+  } catch (error) {
+    console.warn(`[daily] ${scope} overview deferred for ${label}:`, String(error));
+    return null;
+  }
+}
+
+async function readExistingDailyOverview(config: IngestConfig, day: string): Promise<string | null> {
+  try {
+    const response = await call(config, `/api/admin/daily?day=${day}`);
+    const payload = (await response.json()) as { overview?: string | null };
+    return typeof payload.overview === 'string' && payload.overview.trim() ? payload.overview.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function selectWeeklyOverviewEntries(digests: DailyDigest[], limit = 20): DailyEntry[] {
+  const ordered = [...digests].sort((a, b) => b.day.localeCompare(a.day));
+  const maxRank = ordered.reduce((max, d) => Math.max(max, d.entries.length), 0);
+  const selected: DailyEntry[] = [];
+  const seen = new Set<string>();
+  const perSource = new Map<SourceId, number>();
+  for (let rank = 0; rank < maxRank && selected.length < limit; rank++) {
+    for (const digest of ordered) {
+      const entry = digest.entries[rank];
+      if (!entry || seen.has(entry.id)) continue;
+      seen.add(entry.id);
+      const count = perSource.get(entry.source) ?? 0;
+      if (count >= 4) continue;
+      selected.push(entry);
+      perSource.set(entry.source, count + 1);
+      if (selected.length >= limit) break;
+    }
+  }
+  return selected;
+}
+
+async function publishWeeklyOverviews(
+  config: IngestConfig,
+  digests: DailyDigest[],
+  updatedDays: string[],
+  token: string,
+  snapshotId: string,
+  now: number,
+): Promise<number> {
+  const touchedWeeks = [...new Set(updatedDays.map((day) => isoWeekOfDay(day)))];
+  if (!touchedWeeks.length) return 0;
+  const currentWeek = isoWeekOfDay(beijingDate(now));
+  const metaByWeek: Record<string, ArchiveIndexMeta> = {};
+  for (const year of new Set(touchedWeeks.map((week) => week.slice(0, 4)))) {
+    try {
+      const index = (await (await call(config, `/api/admin/weekly?year=${year}`)).json()) as {
+        meta?: Record<string, ArchiveIndexMeta>;
+      };
+      if (index.meta) Object.assign(metaByWeek, index.meta);
+    } catch {
+      // Weekly overview endpoint optional during rolling deploys.
+      return 0;
+    }
+  }
+  let written = 0;
+  for (const week of touchedWeeks) {
+    const weekDigests = digests.filter((digest) => isoWeekOfDay(digest.day) === week);
+    const selected = selectWeeklyOverviewEntries(weekDigests);
+    if (selected.length < 2) continue;
+    const sig = entriesSignature(selected);
+    const existing = metaByWeek[week];
+    if (existing?.sig === sig) continue;
+    if (week === currentWeek && existing?.uploaded && now - existing.uploaded < WEEKLY_OVERVIEW_REFRESH_MS) {
+      continue;
+    }
+    const overview = await requestDigestOverview(config, 'weekly', formatIsoWeekLabel(week), selected);
+    if (!overview) continue;
+    const payload: WeeklyOverview = {
+      version: 1,
+      week,
+      entrySignature: sig,
+      overview,
+      generatedAt: now,
+    };
+    const body = JSON.stringify(payload);
+    const sha256 = createHash('sha256').update(body).digest('hex');
+    try {
+      await call(config, `/api/admin/weekly/${week}`, {
+        method: 'PUT',
+        body,
+        headers: {
+          'content-type': 'application/json',
+          'x-content-sha256': sha256,
+          'x-publisher-lease': token,
+          'x-expected-snapshot': snapshotId,
+        },
+      });
+      written++;
+    } catch (error) {
+      console.warn(`[daily] weekly overview upload deferred for ${week}:`, String(error));
+    }
+  }
+  return written;
+}
+
 export async function publishDailyDigests(config: IngestConfig, items: FeedItem[], token: string, snapshotId: string): Promise<number> {
-  const digests = buildDailyDigests(items);
+  const now = Date.now();
+  const digests = buildDailyDigests(items, now);
   const hashes: Record<string, string> = {};
+  const meta: Record<string, ArchiveIndexMeta> = {};
   for (const year of new Set(digests.map((digest) => digest.day.slice(0, 4)))) {
-    const index = await (await call(config, `/api/admin/daily?year=${year}`)).json() as { hashes: Record<string, string> };
+    const index = await (await call(config, `/api/admin/daily?year=${year}`)).json() as {
+      hashes: Record<string, string>;
+      meta?: Record<string, ArchiveIndexMeta>;
+    };
     Object.assign(hashes, index.hashes);
+    if (index.meta) Object.assign(meta, index.meta);
   }
   const updatedDays: string[] = [];
   const updatedSources = new Set<SourceId>();
   const updatedTopics = new Set<TopicId>();
-  const yesterday = beijingDate(Date.now() - 86400000);
+  const today = beijingDate(now);
+  const yesterday = beijingDate(now - 86400000);
   for (const digest of digests) {
     const day = digest.day;
     if (!isDailyDigest(digest)) {
@@ -285,6 +431,23 @@ export async function publishDailyDigests(config: IngestConfig, items: FeedItem[
     }
     // Completed historical pages stay intact as the rolling timeline expires.
     if (hashes[digest.day] && digest.day < yesterday) continue;
+    if (config.prewarmTranslations && digest.entries.length >= 2) {
+      const sig = entriesSignature(digest.entries);
+      const prev = meta[day];
+      const recentlyGeneratedToday =
+        day === today &&
+        Boolean(prev?.hasOverview) &&
+        typeof prev?.uploaded === 'number' &&
+        now - prev.uploaded < DAILY_OVERVIEW_REFRESH_MS;
+      if (prev?.hasOverview && (prev.sig === sig || recentlyGeneratedToday)) {
+        const preserved = await readExistingDailyOverview(config, day);
+        if (preserved) digest.overview = preserved;
+      }
+      if (!digest.overview) {
+        const generated = await requestDigestOverview(config, 'daily', day, digest.entries);
+        if (generated) digest.overview = generated;
+      }
+    }
     const body = JSON.stringify(digest);
     const sha256 = createHash('sha256').update(body).digest('hex');
     if (hashes[digest.day] === sha256) continue;
@@ -300,6 +463,9 @@ export async function publishDailyDigests(config: IngestConfig, items: FeedItem[
     }
   }
   if (updatedDays.length > 0) {
+    if (config.prewarmTranslations) {
+      await publishWeeklyOverviews(config, digests, updatedDays, token, snapshotId, now);
+    }
     const updatedDaySet = new Set(updatedDays);
     for (const item of items) {
       if (item.hidden || item.clusterOf || !Number.isFinite(item.publishedAt)) continue;

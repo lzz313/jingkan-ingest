@@ -2,18 +2,30 @@ import type { SourceId } from './types';
 import { isSourceId } from './sources';
 
 export const DAILY_PREFIX = 'seo/daily/';
+export const WEEKLY_PREFIX = 'seo/weekly/';
 export interface DailyEntry {
   id: string; source: SourceId; title: string; originalTitle?: string; summary: string; url: string; author: string | null;
   publishedAt: number; reason: string;
 }
 export interface DailyDigest {
   version: 1; day: string; total: number; sources: Partial<Record<SourceId, number>>; entries: DailyEntry[];
+  /** Optional AI-generated Chinese editorial overview (120–260 chars). */
+  overview?: string;
+}
+export interface WeeklyOverview {
+  version: 1;
+  week: string;
+  entrySignature: string;
+  overview: string;
+  generatedAt: number;
 }
 export interface DailyArchivePreview {
   total?: number;
   sourceCount?: number;
   entryCount?: number;
   preview?: string;
+  sig?: string;
+  hasOverview?: boolean;
 }
 
 export function clipDailyText(text: string, maxLength: number): string {
@@ -23,6 +35,19 @@ export function clipDailyText(text: string, maxLength: number): string {
   const characters = Array.from(cleaned);
   if (characters.length <= maxLength) return cleaned;
   return `${characters.slice(0, Math.max(1, maxLength - 1)).join('').trimEnd()}…`;
+}
+
+/** Deterministic lightweight signature of a digest's selected entries (for AI overview caching). */
+export function entriesSignature(entries: ReadonlyArray<Pick<DailyEntry, 'id' | 'title'>>): string {
+  const input = entries.map((entry) => `${entry.id}:${entry.title}`).join('|');
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b1;
+  for (let i = 0; i < input.length; i++) {
+    const code = input.charCodeAt(i);
+    h1 = Math.imul(h1 ^ code, 16777619) >>> 0;
+    h2 = Math.imul(h2 ^ (code + i), 2246822519) >>> 0;
+  }
+  return `${h1.toString(16).padStart(8, '0')}${h2.toString(16).padStart(8, '0')}`;
 }
 
 /** Compact preview stored in R2 customMetadata so archive indexes need no extra object reads. */
@@ -41,6 +66,8 @@ export function buildDailyArchiveMetadata(digest: DailyDigest): Record<string, s
     total: String(digest.total),
     sources: String(Object.keys(digest.sources).length),
     entries: String(digest.entries.length),
+    sig: entriesSignature(digest.entries),
+    ...(digest.overview ? { hasOverview: '1' } : {}),
     ...(headlines.length ? { preview: headlines.join(' · ') } : {}),
   };
 }
@@ -53,11 +80,14 @@ export function parseDailyArchiveMetadata(metadata?: Record<string, string>): Da
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
   };
   const preview = metadata.preview?.trim();
+  const sig = metadata.sig?.trim();
   return {
     total: parseCount(metadata.total),
     sourceCount: parseCount(metadata.sources),
     entryCount: parseCount(metadata.entries),
     ...(preview ? { preview } : {}),
+    ...(sig && /^[a-f0-9]{8,64}$/.test(sig) ? { sig } : {}),
+    ...(metadata.hasOverview === '1' ? { hasOverview: true } : {}),
   };
 }
 export function isDailyDate(value: string): boolean {
@@ -66,6 +96,7 @@ export function isDailyDate(value: string): boolean {
   return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
 }
 export function dailyKey(day: string): string { return `${DAILY_PREFIX}${day.slice(0, 4)}/${day}.json`; }
+export function weeklyKey(week: string): string { return `${WEEKLY_PREFIX}${week.slice(0, 4)}/${week}.json`; }
 export function beijingDate(timestamp: number): string { return new Date(timestamp + 8 * 3600000).toISOString().slice(0, 10); }
 
 const DAY_MS = 86_400_000;
@@ -135,6 +166,7 @@ export function isDailyDigest(value: unknown): value is DailyDigest {
   if (!value || typeof value !== 'object') return false;
   const digest = value as DailyDigest;
   if (digest.version !== 1 || typeof digest.day !== 'string' || !isDailyDate(digest.day) || !Number.isSafeInteger(digest.total) || digest.total < 1 ||
+    (digest.overview !== undefined && (typeof digest.overview !== 'string' || !digest.overview.trim() || digest.overview.length > 600)) ||
     !digest.sources || typeof digest.sources !== 'object' || Array.isArray(digest.sources) ||
     Object.entries(digest.sources).some(([source, count]) => !isSourceId(source) || !Number.isSafeInteger(count) || count! < 1) ||
     Object.values(digest.sources).reduce((sum, count) => sum + count!, 0) !== digest.total ||
@@ -155,4 +187,22 @@ export function isDailyDigest(value: unknown): value is DailyDigest {
     perSource.set(entry.source, count);
     return count <= 2 && count <= digest.sources[entry.source]!;
   });
+}
+
+export function isWeeklyOverview(value: unknown): value is WeeklyOverview {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as WeeklyOverview;
+  return (
+    record.version === 1 &&
+    typeof record.week === 'string' &&
+    isIsoWeek(record.week) &&
+    typeof record.entrySignature === 'string' &&
+    /^[a-f0-9]{8,64}$/.test(record.entrySignature) &&
+    typeof record.overview === 'string' &&
+    record.overview.trim().length > 0 &&
+    record.overview.length <= 600 &&
+    typeof record.generatedAt === 'number' &&
+    Number.isFinite(record.generatedAt) &&
+    record.generatedAt > 0
+  );
 }

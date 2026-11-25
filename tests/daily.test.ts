@@ -194,3 +194,109 @@ it('submits updated archive URLs to IndexNow when configured and never blocks on
   vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })));
   expect(await notifyIndexNow(config, ['2026-11-12'])).toBe(false);
 });
+
+it('generates daily and weekly AI editorial overviews when prewarmTranslations is enabled and fails open on 503', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(now);
+  const items = [
+    { ...item('hn', 1, now), title: 'LLM Inference Optimization', titleZh: '大模型推理加速' },
+    { ...item('github', 2, now), title: 'acme/agent-kit', briefZh: '开源智能体框架' },
+  ];
+  const dailySummary = '当日科技圈聚焦大模型推理加速与开源智能体框架，工程实践重心向低延迟部署与开发工具集成收敛。';
+  const weeklySummary = '本周开源 AI 工具与推理优化密集更新，社区讨论围绕端侧性能与开发工作流展开。';
+  const dailyWrites: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const weeklyWrites: Array<{ path: string; body: Record<string, unknown> }> = [];
+  let enrichCalls = 0;
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname === '/api/admin/daily' && url.searchParams.has('year')) {
+      return new Response(JSON.stringify({ hashes: {}, meta: {} }));
+    }
+    if (url.pathname === '/api/admin/weekly' && url.searchParams.has('year')) {
+      return new Response(JSON.stringify({ hashes: {}, meta: {} }));
+    }
+    if (url.pathname === '/api/admin/enrich') {
+      enrichCalls++;
+      const req = JSON.parse(String(init?.body)) as { scope?: string };
+      return new Response(JSON.stringify({ overview: req.scope === 'weekly' ? weeklySummary : dailySummary }));
+    }
+    if (url.pathname.startsWith('/api/admin/daily/') && init?.method === 'PUT') {
+      dailyWrites.push({ path: url.pathname, body: JSON.parse(String(init.body)) as Record<string, unknown> });
+      return new Response(JSON.stringify({ ok: true }));
+    }
+    if (url.pathname.startsWith('/api/admin/weekly/') && init?.method === 'PUT') {
+      weeklyWrites.push({ path: url.pathname, body: JSON.parse(String(init.body)) as Record<string, unknown> });
+      return new Response(JSON.stringify({ ok: true }));
+    }
+    return new Response('{}');
+  }));
+
+  const config = {
+    baseUrl: 'https://jing.show',
+    ingestToken: 'test',
+    prewarmTranslations: true,
+    dedupe: DEDUPE_DEFAULTS,
+    cluster: CLUSTER_DEFAULTS,
+  };
+  expect(await publishDailyDigests(config, items, 'lease-token', 'snap-1')).toBe(1);
+  expect(enrichCalls).toBe(2);
+  expect(dailyWrites).toHaveLength(1);
+  expect(dailyWrites[0]!.body.overview).toBe(dailySummary);
+  expect(weeklyWrites).toHaveLength(1);
+  expect(weeklyWrites[0]!.path).toBe('/api/admin/weekly/2026-W46');
+  expect(weeklyWrites[0]!.body.overview).toBe(weeklySummary);
+
+  // Within 2h on the same day, preserve the stored daily overview without re-calling AI.
+  enrichCalls = 0;
+  dailyWrites.length = 0;
+  weeklyWrites.length = 0;
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname === '/api/admin/daily' && url.searchParams.has('year')) {
+      return new Response(JSON.stringify({
+        hashes: { '2026-11-13': 'old-hash' },
+        meta: { '2026-11-13': { sig: 'different-sig', hasOverview: true, uploaded: now - 30 * 60_000 } },
+      }));
+    }
+    if (url.pathname === '/api/admin/daily' && url.searchParams.get('day') === '2026-11-13') {
+      return new Response(JSON.stringify({ day: '2026-11-13', overview: dailySummary, uploaded: now - 30 * 60_000 }));
+    }
+    if (url.pathname === '/api/admin/weekly' && url.searchParams.has('year')) {
+      return new Response(JSON.stringify({
+        hashes: { '2026-W46': 'old-weekly' },
+        meta: { '2026-W46': { sig: 'other', uploaded: now - 30 * 60_000 } },
+      }));
+    }
+    if (url.pathname === '/api/admin/enrich') {
+      enrichCalls++;
+      return new Response(JSON.stringify({ overview: 'should not be called' }));
+    }
+    if (url.pathname.startsWith('/api/admin/daily/') && init?.method === 'PUT') {
+      dailyWrites.push({ path: url.pathname, body: JSON.parse(String(init.body)) as Record<string, unknown> });
+      return new Response(JSON.stringify({ ok: true }));
+    }
+    return new Response('{}');
+  }));
+  expect(await publishDailyDigests(config, items, 'lease-token', 'snap-2')).toBe(1);
+  expect(enrichCalls).toBe(0);
+  expect(dailyWrites[0]!.body.overview).toBe(dailySummary);
+
+  // When Workers AI is unavailable, daily publishing still succeeds without overview.
+  dailyWrites.length = 0;
+  weeklyWrites.length = 0;
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname === '/api/admin/daily' && url.searchParams.has('year')) return new Response(JSON.stringify({ hashes: {}, meta: {} }));
+    if (url.pathname === '/api/admin/weekly' && url.searchParams.has('year')) return new Response(JSON.stringify({ hashes: {}, meta: {} }));
+    if (url.pathname === '/api/admin/enrich') return new Response('unavailable', { status: 503 });
+    if (url.pathname.startsWith('/api/admin/daily/') && init?.method === 'PUT') {
+      dailyWrites.push({ path: url.pathname, body: JSON.parse(String(init.body)) as Record<string, unknown> });
+      return new Response(JSON.stringify({ ok: true }));
+    }
+    return new Response('{}');
+  }));
+  expect(await publishDailyDigests(config, items, 'lease-token', 'snap-3')).toBe(1);
+  expect(dailyWrites).toHaveLength(1);
+  expect(dailyWrites[0]!.body.overview).toBeUndefined();
+  expect(weeklyWrites).toHaveLength(0);
+});
