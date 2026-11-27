@@ -38,6 +38,7 @@ const SOURCE_QUALITY: Partial<Record<SourceId, number>> = {
   v2ex: 10,
   linuxdo: 10,
   nodeseek: 10,
+  lobsters: 8,
   reddit: 8,
   producthunt: 8,
   x: 5,
@@ -123,6 +124,11 @@ export function dailyReason(item: FeedItem): string {
       addMetric(metrics.upvotes, (n) => `${n} 赞同`);
       addMetric(metrics.comments, (n) => `${n} 讨论`);
       break;
+    case 'lobsters':
+      addMetric(metrics.points, (n) => `${n} 分`);
+      addMetric(metrics.comments, (n) => `${n} 评论`);
+      if (typeof extra.category === 'string' && extra.category.trim()) parts.push(`#${extra.category.trim()}`);
+      break;
     case 'reddit':
       if (typeof extra.subreddit === 'string' && extra.subreddit.trim()) parts.push(`r/${extra.subreddit.trim()}`);
       break;
@@ -147,7 +153,7 @@ export function dailyReason(item: FeedItem): string {
 
   if (!parts.length) {
     parts.push(item.isHot ? '达到该来源活跃热度门槛' : `${SOURCES[item.source].shortName} 当日质量精选`);
-  } else if (item.isHot && parts.length === 1 && (item.source === 'reddit' || item.source === 'producthunt')) {
+  } else if (item.isHot && parts.length === 1 && (item.source === 'reddit' || item.source === 'lobsters' || item.source === 'producthunt')) {
     parts.push('达到活跃热度门槛');
   }
 

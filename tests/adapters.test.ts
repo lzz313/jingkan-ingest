@@ -5,7 +5,7 @@ import { fetchLinuxDo, parseReaderMarkdown } from '../src/ingest/adapters/linuxd
 import { fetchHn } from '../src/ingest/adapters/hn';
 import { fetchGithub } from '../src/ingest/adapters/github';
 import { fetchGoogleAi } from '../src/ingest/adapters/google-ai';
-import { fetchReddit } from '../src/ingest/adapters/reddit';
+import { fetchLobsters } from '../src/ingest/adapters/lobsters';
 import { fetchHuggingFacePapers } from '../src/ingest/adapters/huggingface';
 import { fetchProductHunt } from '../src/ingest/adapters/producthunt';
 import { fetchSimonW } from '../src/ingest/adapters/simonw';
@@ -532,50 +532,52 @@ describe('X adapter', () => {
   });
 });
 
-describe('Reddit adapter', () => {
-  it('maps the multireddit hot feed and keeps its rank as the heat signal', async () => {
+describe('Lobsters adapter', () => {
+  it('maps the hottest JSON and keeps score/comments as the heat signal', async () => {
     stubFetch([
       {
-        match: 'reddit.com/r/programming+technology',
-        file: 'reddit.xml',
-        type: 'application/atom+xml',
+        match: 'lobste.rs/hottest.json',
+        file: 'lobsters.json',
+        type: 'application/json',
       },
     ]);
-    const items = await fetchReddit();
+    const items = await fetchLobsters();
     expect(items).toHaveLength(3);
 
     const link = items[0]!;
-    expect(link.source).toBe('reddit');
-    expect(link.externalId).toBe('aaa111');
-    expect(link.url).toBe('https://example.com/parser?x=1&y=2');
-    expect(link.author).toBe('alice');
-    expect(link.metrics?.rank).toBe(1);
-    expect(link.extra?.subreddit).toBe('programming');
-    expect(link.extra?.redditUrl).toBe(
-      'https://www.reddit.com/r/programming/comments/aaa111/tiny_parser/',
-    );
-    expect(link.images?.[0]).toBe(
-      'https://external-preview.redd.it/thumb.jpeg?width=640&crop=smart&s=abc',
+    expect(link.source).toBe('lobsters');
+    expect(link.externalId).toBe('wzlzlh');
+    expect(link.url).toBe('https://www.openwall.com/lists/oss-security/2026/11/25/9');
+    expect(link.author).toBe('hanno');
+    expect(link.metrics?.points).toBe(109);
+    expect(link.metrics?.comments).toBe(17);
+    expect(link.extra?.category).toBe('linux');
+    expect(link.extra?.tags).toBe('linux security');
+    expect(link.extra?.lobstersUrl).toBe(
+      'https://lobste.rs/s/wzlzlh/slow_ubuntu_security_response_times',
     );
     expect(link.body).toBe('');
+    expect(link.publishedAt).toBe(Date.parse('2026-11-25T14:10:24.526-06:00'));
 
-    const self = items[1]!;
-    // Self posts link to their comments page and carry the text in SC_OFF.
-    expect(self.url).toBe('https://www.reddit.com/r/webdev/comments/bbb222/free_tiers/');
-    expect(self.body).toContain('free tiers handle abuse');
-    expect(self.brief).toContain('free tiers handle abuse');
-    expect(self.metrics?.rank).toBe(2);
+    const textPost = items[1]!;
+    // A text post has no external article; link to its discussion page.
+    expect(textPost.url).toBe('https://lobste.rs/s/abcdef/a_text_post');
+    expect(textPost.body).toContain('a text post body');
+    expect(textPost.brief).toContain('a text post body');
+    expect(textPost.extra?.category).toBe('meta');
 
-    const share = items[2]!;
-    // reddit.com/r/<sub>/s/... share links are not external articles.
-    expect(share.url).toBe('https://www.reddit.com/r/webdev/comments/ccc333/update/');
-    expect(share.extra?.subreddit).toBe('webdev');
-    expect(share.metrics?.rank).toBe(3);
+    const legacy = items[2]!;
+    // A self-hosted lobste.rs URL is still a discussion page.
+    expect(legacy.url).toBe('https://lobste.rs/s/ghijkl/another_text_post');
+    expect(legacy.metrics?.points).toBe(3);
   });
 
   it('rejects an unexpected payload instead of reporting an empty success', async () => {
-    vi.stubGlobal('fetch', async () => new Response('<html>blocked</html>', { status: 200 }));
-    await expect(fetchReddit()).rejects.toThrow('unexpected feed');
+    vi.stubGlobal('fetch', async () => new Response('{"not":"a list"}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    await expect(fetchLobsters()).rejects.toThrow('unexpected payload');
   });
 });
 

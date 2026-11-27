@@ -111,7 +111,7 @@ function itemSearchText(item: TopicMatchableItem): string {
   else if (item.brief) parts.push(item.brief);
   if (item.url) parts.push(item.url.replace(/^https?:\/\//i, ''));
   const extra = item.extra ?? {};
-  for (const key of ['lang', 'nodeTitle', 'category', 'subreddit'] as const) {
+  for (const key of ['lang', 'nodeTitle', 'category', 'subreddit', 'tags'] as const) {
     const val = extra[key];
     if (typeof val === 'string' && val.trim()) parts.push(val.trim());
   }

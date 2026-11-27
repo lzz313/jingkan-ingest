@@ -21,7 +21,7 @@ it('ranks the day by quality, caps a source at two, and excludes hidden records'
   items.push({ ...item('hn', 101), clusterOf: 'hn:0' });
   items[0]!.briefZh = '长'.repeat(2000);
   const [digest] = buildDailyDigests(items, now);
-  expect(digest!.total).toBe(110);
+  expect(digest!.total).toBe(120);
   expect(digest!.entries).toHaveLength(12);
   // Quality-first still caps each source, so the digest spans several sources.
   expect(new Set(digest!.entries.map((entry) => entry.source)).size).toBeGreaterThanOrEqual(6);

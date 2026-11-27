@@ -139,6 +139,9 @@ describe('hot scoring', () => {
     expect(computeHot('v2ex', { replies: 19 }).isHot).toBe(false);
     expect(computeHot('v2ex', { replies: 20 }).isHot).toBe(true);
     expect(computeHot('hn', { points: 30, comments: 0 }).isHot).toBe(true);
+    expect(computeHot('lobsters', { points: 24, comments: 9 }).isHot).toBe(false);
+    expect(computeHot('lobsters', { points: 25, comments: 0 }).isHot).toBe(true);
+    expect(computeHot('lobsters', { points: 0, comments: 10 }).isHot).toBe(true);
     expect(computeHot('github', { starsToday: 100 }).isHot).toBe(true);
     expect(computeHot('nodeseek', {}).isHot).toBe(false);
     expect(computeHot('nodeseek', { comments: 5 }).isHot).toBe(false);

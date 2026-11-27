@@ -10,7 +10,8 @@
 - LINUX DO
 - Hacker News（卡片链接使用 YC 讨论页，历史条目保留原链接）
 - GitHub Trending
-- Reddit（r/programming / r/technology / r/LocalLLaMA / r/webdev 合并热榜，RSS）
+- Lobsters（公开 hottest JSON，保留分数、评论数与标签）
+- Reddit（已停用：官方于 2026-11-13 终止 RSS，并于 2026-10-31 停止受理新的公开 API 申请；历史条目保留，来源由 Lobsters 接替）
 - Hugging Face Daily Papers（官方 JSON）
 - Simon Willison（Atom，只保留 AI 相关标签）
 - Google AI Blog（官方 RSS）
@@ -50,7 +51,7 @@ X 在页面上仍是一个频道，内部由两个公开入口互补：`X 榜单
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
 | `INGEST_TOKEN` | Secret | 与 Worker 的 `INGEST_TOKEN` secret 相同 |
-| `PREWARM_TRANSLATIONS` | Variable | 可选，设为 `0` 可关闭翻译预热与回填（HN 标题/正文、Reddit 标题、GitHub 简介、AI 来源标题/摘要；Product Hunt 保留产品名并翻译简介） |
+| `PREWARM_TRANSLATIONS` | Variable | 可选，设为 `0` 可关闭翻译预热与回填（HN 标题/正文、GitHub 简介、AI 来源标题/摘要；Product Hunt 保留产品名并翻译简介） |
 
 Worker 地址直接写在 `.github/workflows/ingest.yml` 里（目前是 `https://jing.show`）；换自定义域名时同步修改即可。
 

@@ -5,6 +5,7 @@ export const SOURCE_IDS = [
   'linuxdo',
   'hn',
   'github',
+  'lobsters',
   'reddit',
   'hf-papers',
   'simonw',
@@ -45,6 +46,8 @@ export interface ItemExtra {
   node?: string;
   nodeTitle?: string;
   lang?: string;
+  /** Space-separated community tags (Lobsters). */
+  tags?: string;
   corePosts?: CorePost[];
   relatedUrls?: string[];
   hnUrl?: string;

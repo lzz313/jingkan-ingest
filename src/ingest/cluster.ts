@@ -10,7 +10,7 @@ const ALGORITHM_VERSION = 'cross-source-cluster-v2';
 const DAY_MS = 86400000;
 const TRACKING_PARAM = /^(?:utm_.+|ref|aff|spm|from|share|share_token)$/i;
 const IMAGE_PATH = /\.(?:png|jpe?g|gif|webp|avif|bmp|svg)$/i;
-const LINK_FIELDS = ['articleUrl', 'arxivUrl', 'paperUrl', 'productUrl', 'hnUrl', 'redditUrl'] as const;
+const LINK_FIELDS = ['articleUrl', 'arxivUrl', 'paperUrl', 'productUrl', 'hnUrl', 'lobstersUrl', 'redditUrl'] as const;
 const MIN_BODY_TOKENS = 8;
 const MIN_LATIN_CHARS = 3;
 /**

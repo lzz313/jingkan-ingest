@@ -64,6 +64,14 @@ export const SOURCES: Record<SourceId, SourceMeta> = {
     color: '#24292f',
     description: '精选 GitHub Trending 当日热门开源项目，附带中文简介、编程语言、Star 增长与仓库直达链接。',
   },
+  lobsters: {
+    id: 'lobsters',
+    name: 'Lobsters',
+    shortName: 'Lobsters',
+    home: 'https://lobste.rs',
+    color: '#ac130d',
+    description: '汇总 Lobsters 技术与开源社区的热门讨论，提供中文标题，保留分数、评论数与标签，并附原文及讨论直达。',
+  },
   reddit: {
     id: 'reddit',
     name: 'Reddit',
@@ -115,6 +123,7 @@ export const SOURCE_ORDER: SourceId[] = [...SOURCE_IDS];
 export const TITLE_TRANSLATION_SOURCES: ReadonlySet<SourceId> = new Set([
   'x',
   'hn',
+  'lobsters',
   'reddit',
   'hf-papers',
   'simonw',
